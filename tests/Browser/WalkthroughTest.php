@@ -50,11 +50,15 @@ it('führt einen vollständigen Login-Flow durch (echte Form, kein actingAs)', f
 it('klickt sich durch alle Resource-Seiten und prüft Konsolen-Fehler', function () {
     $this->actingAs($this->marie);
 
-    // Tenant-Dashboard
+    // Tenant-Dashboard — sollte jetzt Stats + aktive Runden + Aufgaben zeigen
     $page = visit('/g/speisekammer-schoeneberg')
         ->assertSee('Speisekammer Schöneberg')
+        ->assertSee('Aktive Runden')
+        ->assertSee('Aktive Bestellrunden')
+        ->assertSee('Was steht für dich an?')
+        ->assertSee('Frühjahr-Bestellung 2026')
         ->assertNoJavaScriptErrors()
-        ->screenshot(filename: '03-dashboard');
+        ->screenshot(filename: '03-dashboard', fullPage: true);
 
     // Hersteller
     $page->navigate('/g/speisekammer-schoeneberg/manufacturers')
@@ -161,6 +165,37 @@ it('lässt sich mit dem Tenant-Switcher zur zweiten Gruppe wechseln', function (
         ->screenshot(filename: '12-second-tenant');
 });
 
+it('Bestellrunden-Wizard zeigt vier Schritte mit Hinweistexten', function () {
+    $this->actingAs($this->marie);
+
+    $page = visit('/g/speisekammer-schoeneberg/rounds/create')
+        ->wait(1)
+        ->assertSee('Neue Bestellrunde starten')
+        ->assertSee('Worum geht\'s?')
+        ->assertSee('Zeitplan')
+        ->assertSee('Abholung')
+        ->assertSee('Finanzen')
+        ->assertSee('Titel der Runde')
+        ->assertSee('Lead — wer koordiniert die Runde?')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '13-round-wizard-step1', fullPage: true);
+});
+
+it('Produkt-Wizard öffnet sich als Modal mit drei Schritten', function () {
+    $this->actingAs($this->marie);
+
+    $page = visit('/g/speisekammer-schoeneberg/products')
+        ->press('Produkt anlegen')
+        ->wait(1)
+        ->assertSee('Stammdaten')
+        ->assertSee('Verpackungs-Logik')
+        ->assertSee('Preisstaffeln')
+        ->assertSee('Hersteller')
+        ->assertSee('Produktname')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '14-product-wizard-step1', fullPage: true);
+});
+
 it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)', function () {
     $this->actingAs($this->marie);
 
@@ -171,6 +206,7 @@ it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)
         "{$base}/manufacturers",
         "{$base}/products",
         "{$base}/rounds",
+        "{$base}/rounds/create",
         "{$base}/members",
     ]);
 
