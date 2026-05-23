@@ -1,58 +1,58 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🪶 Foodpecker
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+**Hamstern Pro**
+> Eine Open-Source-Plattform für kollektive Sammelbestellungen direkt beim Hersteller.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Was ist Foodpecker?
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Foodpecker hilft Freundesgruppen, Lebensmittel und Grundversorgungsgüter (Reis, Mais, Nudeln, Senf, …) gemeinsam in großen Mengen direkt beim Hersteller zu bestellen. Durch das Bündeln der Mengen werden Großgebinde- und Palettenpreise erreichbar. Gut für große Speisekammern.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Der Name ist abgeleitet vom englischen *Woodpecker*, dem **[Eichelspecht](https://www.youtube.com/watch?v=3CWGne2eGf4)**, der gemeinsam mit seinem Schwarm tausende Eicheln in einem Speicherbaum einlagert und über sie wacht, beschafft und verwaltet eine Foodpecker-Gruppe ihre Vorräte kollektiv.
 
-## Learning Laravel
+## Grundwerte
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- **Zusammenarbeit** — Jeder kann eine Bestellrunde starten, Vorschläge machen und mitgestalten. Entscheidungen sind transparent und für alle sichtbar.
+- **Fairness** — Niemand wird zu Mengen gezwungen, die er nicht möchte. Verpackungsbeschränkungen werden gemeinsam gelöst.
+- **Flexibilität** — Zeitpläne lassen sich verschieben, Rollen mit Zustimmung übergeben. Das System passt sich an reale Gruppen an.
+- **Vertrauen** — Nur für Freunde gedacht! Konflikte werden persönlich geklärt; die Plattform ist nur ein Hilfsmittel und Excel Ersatz.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Kernfunktionen
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+- **Multi-Tenancy** — Mehrere Gruppen nutzen eine Plattform, jede in ihrem eigenen Raum. Hersteller und Produkte können optional zwischen Gruppen geteilt werden.
+- **Geteilte Hersteller & Produkte** — Öffentliche Hersteller und Produkte stehen allen Gruppen zur Verfügung. Echte Bestellpreise fließen als Richtwerte zurück in die Produktdaten.
+- **Flexible Verpackungslogik** — Feste Paketgrößen, Mengenstaffeln mit Preisvorteil, teilbare Paletten, nicht teilbare Packungen und abwiegbare Großgebinde.
+- **Kollaborative Bestellrunden** — Jeder kann eine Runde mit definiertem Zeitplan (Einkauf → Verhandlung → Bestätigung → Zahlung → Lieferung → Abholung) starten.
+- **Flexible Warenkörbe** — Pro Artikel entweder eine exakte Menge oder eine flexible Spanne („zwischen 1 und 3 kg") für faire Aufteilung.
+- **Konsens-basierte Bestellung** — Der Lead schlägt eine finale Bestellung vor, Teilnehmer stimmen mit Daumen hoch/runter ab. Der Lead soll nur einstimmig bestätigte Bestellungen tatsächlich platzieren.
+- **Manuelle, editierbare Benachrichtigungen** — Das System erzeugt einen Änderungs-Entwurf, den der Lead vor dem Versand anpassen kann. Kein E-Mail-Spam.
+- **Aktivitäten-Stream & Notizen** — Wer hat wann was geändert? Notizen zu Herstellern und abgeschlossenen Runden helfen, aus Erfahrungen zu lernen.
+- **Historie** — Vergangene Bestellungen mit eingefrorenen Preisen als Referenz für die nächste Runde.
+- **Faires Finanzmodell** — Aufwandsentschädigung (in %) für den Lead, ~1% Spende an die Foodpecker Organisation/Verein (tbd).
 
-## Agentic Development
+## Drei Rollen pro Gruppe
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+| Rolle | Berechtigungen |
+|-------|----------------|
+| **Owner** | Voller Zugriff, kann die Gruppe löschen |
+| **Moderator** | Produkte & Hersteller verwalten, Runden starten, einladen, Rollen vergeben |
+| **Participant** | Einkaufen, Warenkörbe füllen, alle Warenkörbe einsehen |
 
-```bash
-composer require laravel/boost --dev
+## Tech-Stack
 
-php artisan boost:install
-```
+- **[Laravel](https://laravel.com)** — PHP-Backend
+- **[Filament](https://filamentphp.com)** — Admin-Panel & UI
+- **Lizenz** — Open Source (siehe [LICENSE](LICENSE))
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Status
 
-## Contributing
+🚧 **In Konzeption / früher Entwicklung.** Das Feature-Konzept steht (siehe [`docs/concept.md`](docs/concept.md)). Mitwirkende sind herzlich willkommen. Achtung: Hier wird gevibecoded oder wie das heißt.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Mitmachen
 
-## Code of Conduct
+Beiträge, Ideen und Feedback sind willkommen! Da das Projekt noch in der frühen Phase ist:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+1. Lies die [docs](docs/)
+2. Öffne ein Issue, um Features oder Konzeptfragen zu diskutieren
+3. Fork das Repo und stelle einen Pull Request für Code-Beiträge
