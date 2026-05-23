@@ -47,7 +47,49 @@ Der Name ist abgeleitet vom englischen *Woodpecker*, dem **[Eichelspecht](https:
 
 ## Status
 
-🚧 **In Konzeption / früher Entwicklung.** Das Feature-Konzept steht (siehe [`docs/concept.md`](docs/concept.md)). Mitwirkende sind herzlich willkommen. Achtung: Hier wird gevibecoded oder wie das heißt.
+🚧 **Früher Prototyp.** Datenmodell, Verwaltungs-UI und Domänenlogik sind als
+lauffähiges Filament-Panel umgesetzt. Architektur-Entscheidungen sind
+dokumentiert (siehe [`ARCHITECTURE.md`](ARCHITECTURE.md)). Fachliche Grundlage:
+[`docs/concept.md`](docs/concept.md). Achtung: Hier wird gevibecoded oder wie das heißt.
+
+## Lokale Entwicklung
+
+Voraussetzungen: PHP 8.3, Composer, Node, [Laravel Herd](https://herd.laravel.com).
+Das Repo läuft erwartet unter `http://foodpecker.test`.
+
+```bash
+composer install
+npm install
+npm run build
+php artisan migrate:fresh --seed
+```
+
+Anschließend `http://foodpecker.test` öffnen — die Login-Maske ist im
+Dev-Modus mit den Demo-Credentials vorausgefüllt:
+
+> **E-Mail:** `marie@foodpecker.test`
+> **Passwort:** `password`
+
+Mails (z. B. Einladungen) gehen im Dev-Modus in `storage/logs/laravel.log`.
+
+### Tests
+
+Domain- und Filament-Smoke-Tests:
+
+```bash
+php artisan test --compact
+```
+
+Browser-Walkthrough in einem echten Headless-Chrome (Pest 4 + Playwright):
+
+```bash
+vendor/bin/pest tests/Browser
+vendor/bin/pest tests/Browser --headed   # sichtbares Fenster zum Zuschauen
+vendor/bin/pest tests/Browser --debug    # pausiert bei Fehler, öffnet Browser
+```
+
+Bei jedem Run werden Screenshots der wichtigsten Seiten unter
+[`tests/Browser/Screenshots/`](tests/Browser/Screenshots/) abgelegt (gitignored).
 
 ## Mitmachen
 
