@@ -190,10 +190,15 @@ class ViewRound extends Page
                     ->searchable(),
                 Select::make('product_id')
                     ->label('Produkt')
-                    ->options(fn () => Product::visibleTo($this->round->group)->orderBy('name')->pluck('name', 'id'))
+                    ->options(fn () => $this->round->availableProductsForCart()
+                        ->orderBy('name')
+                        ->pluck('name', 'products.id'))
                     ->searchable()
                     ->preload()
-                    ->required(),
+                    ->required()
+                    ->helperText($this->round->availableProducts()->exists()
+                        ? 'Produkte aus dem für diese Runde kuratierten Sortiment.'
+                        : 'Alle für die Gruppe sichtbaren Produkte.'),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
                     ->options(QuantityMode::class)
@@ -327,10 +332,46 @@ class ViewRound extends Page
             ->action(function (array $data): void {
                 $draft = app(DraftBuilder::class)->buildDraft($this->round, $data['kind'], auth()->user());
                 Notification::make()
-                    ->title('Entwurf erstellt — siehe Tab "Benachrichtigungen".')
+                    ->title('Entwurf erstellt — siehe Tab "Aktivitäten & Benachrichtigungen".')
                     ->body('Du kannst den Text dort noch anpassen, bevor er versendet wird.')
                     ->success()
                     ->send();
+                $this->refreshRound();
+            });
+    }
+
+    public function editDraftAction(): Action
+    {
+        return Action::make('editDraft')
+            ->label('Bearbeiten')
+            ->icon('heroicon-o-pencil-square')
+            ->color('gray')
+            ->size('xs')
+            ->modalHeading('Benachrichtigungs-Entwurf bearbeiten')
+            ->modalDescription('Pass Betreff und Text an. Sobald du speicherst, ist der Entwurf bereit zum Versand.')
+            ->modalWidth('3xl')
+            ->fillForm(function (array $arguments): array {
+                $draft = $this->round->notificationDrafts()->find((int) ($arguments['draft_id'] ?? 0));
+
+                return $draft ? $draft->only(['subject', 'body']) : [];
+            })
+            ->schema([
+                TextInput::make('subject')
+                    ->label('Betreff')
+                    ->required()
+                    ->maxLength(255),
+                Textarea::make('body')
+                    ->label('Nachrichten-Text (Markdown)')
+                    ->required()
+                    ->rows(18)
+                    ->helperText('Markdown unterstützt — Überschriften (#), Listen (-), Fett (**…**). Wird beim Versenden als E-Mail-Text genutzt.'),
+            ])
+            ->action(function (array $data, array $arguments): void {
+                $draft = $this->round->notificationDrafts()->find((int) ($arguments['draft_id'] ?? 0));
+                if ($draft) {
+                    $draft->update($data);
+                    Notification::make()->title('Entwurf gespeichert.')->success()->send();
+                }
                 $this->refreshRound();
             });
     }

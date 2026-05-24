@@ -138,7 +138,7 @@ class ManufacturerResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make()->label('Ansehen')->slideOver(),
-                EditAction::make()->label('Bearbeiten')->slideOver(),
+                EditAction::make()->label('Bearbeiten')->modalWidth('4xl'),
                 DeleteAction::make()->label('Löschen'),
             ])
             ->toolbarActions([

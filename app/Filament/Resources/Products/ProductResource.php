@@ -103,6 +103,7 @@ class ProductResource extends Resource
                         ->orderColumn('sort_order')
                         ->itemLabel(fn (array $state): ?string => $state['label'] ?? null)
                         ->collapsible()
+                        ->cloneable()
                         ->schema([
                             TextInput::make('label')
                                 ->label('Label')
@@ -114,30 +115,34 @@ class ProductResource extends Resource
                                 ->numeric()
                                 ->required()
                                 ->step(0.001)
-                                ->minValue(0.001),
+                                ->minValue(0.001)
+                                ->columnSpan(1),
                             TextInput::make('price_cents')
-                                ->label('Preis in Cent')
+                                ->label('Preis')
                                 ->numeric()
                                 ->required()
-                                ->suffix('Cent'),
+                                ->suffix('Cent')
+                                ->columnSpan(1),
                             TextInput::make('min_order_packages')
-                                ->label('Mindestbestellmenge')
+                                ->label('Min. Gebinde')
                                 ->numeric()
                                 ->default(1)
-                                ->suffix('Gebinde'),
+                                ->columnSpan(1),
                             Toggle::make('is_divisible')
-                                ->label('Teilbar?')
+                                ->label('Innerhalb der Gruppe teilbar?')
                                 ->default(true)
-                                ->helperText('Kann ein Gebinde innerhalb der Gruppe aufgeteilt werden?')
-                                ->live(),
+                                ->live()
+                                ->columnSpan(2)
+                                ->inline(false),
                             TextInput::make('divisible_step')
                                 ->label('Teilschritt')
                                 ->numeric()
                                 ->step(0.001)
-                                ->helperText('In welchen Schritten teilbar? Leer = volle Einheit.')
-                                ->visible(fn ($get) => $get('is_divisible')),
+                                ->placeholder('z. B. 0.5')
+                                ->visible(fn ($get) => $get('is_divisible'))
+                                ->columnSpan(2),
                         ])
-                        ->columns(3)
+                        ->columns(4)
                         ->defaultItems(1)
                         ->addActionLabel('Weitere Größe hinzufügen'),
                 ]),
@@ -206,7 +211,7 @@ class ProductResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make()->label('Ansehen')->slideOver(),
-                EditAction::make()->label('Bearbeiten')->slideOver(),
+                EditAction::make()->label('Bearbeiten')->modalWidth('6xl'),
                 DeleteAction::make()->label('Löschen'),
             ])
             ->toolbarActions([

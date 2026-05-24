@@ -5,10 +5,12 @@ namespace App\Filament\Resources\Rounds\Pages;
 use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\RoundResource;
 use App\Models\Group;
+use App\Models\Product;
 use App\Models\Round;
 use App\Models\RoundParticipant;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -32,7 +34,7 @@ class CreateRound extends CreateRecord
 
     public function getSubheading(): ?string
     {
-        return 'In vier Schritten zur neuen Runde — alle Angaben sind später noch änderbar.';
+        return 'In fünf Schritten zur neuen Runde — alle Angaben sind später noch änderbar.';
     }
 
     public function hasSkippableSteps(): bool
@@ -65,6 +67,20 @@ class CreateRound extends CreateRecord
                         ->rows(3)
                         ->placeholder('Worauf wollen wir uns dieses Mal konzentrieren? Was ist diesmal anders?')
                         ->maxLength(1000),
+                ]),
+
+            Step::make('Sortiment')
+                ->description('Welche Produkte sind diesmal bestellbar?')
+                ->icon(Heroicon::OutlinedShoppingCart)
+                ->schema([
+                    CheckboxList::make('available_products')
+                        ->label('Bestellbare Produkte')
+                        ->options(fn () => $this->productOptions())
+                        ->descriptions(fn () => $this->productDescriptions())
+                        ->columns(2)
+                        ->bulkToggleable()
+                        ->helperText('Wähle die Produkte aus, die diesmal in den Warenkörben auftauchen sollen. Leer = alle für die Gruppe sichtbaren Produkte erlauben. Du kannst die Auswahl später jederzeit anpassen.')
+                        ->columnSpanFull(),
                 ]),
 
             Step::make('Zeitplan')
@@ -183,8 +199,14 @@ class CreateRound extends CreateRecord
         $data['phase'] = RoundPhase::Draft->value;
         $data['phase_changed_at'] = now();
 
+        // available_products ist kein DB-Feld auf rounds — abspalten und in afterCreate verarbeiten
+        $this->availableProductIds = collect($data['available_products'] ?? [])->map(fn ($id) => (int) $id)->all();
+        unset($data['available_products']);
+
         return $data;
     }
+
+    protected array $availableProductIds = [];
 
     protected function afterCreate(): void
     {
@@ -196,6 +218,10 @@ class CreateRound extends CreateRecord
             'round_id' => $round->id,
             'user_id' => $round->lead_user_id,
         ]);
+
+        if (! empty($this->availableProductIds)) {
+            $round->availableProducts()->sync($this->availableProductIds);
+        }
 
         $round->logActivity('created', ['title' => $round->title]);
     }
@@ -219,6 +245,34 @@ class CreateRound extends CreateRecord
             ->orderBy('first_name')
             ->get()
             ->mapWithKeys(fn (User $u) => [$u->id => $u->fullName().' · '.$u->email])
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function productOptions(): array
+    {
+        return Product::visibleTo(Filament::getTenant())
+            ->with('manufacturer')
+            ->orderBy('name')
+            ->get()
+            ->mapWithKeys(fn (Product $p) => [$p->id => $p->name])
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function productDescriptions(): array
+    {
+        return Product::visibleTo(Filament::getTenant())
+            ->with('manufacturer')
+            ->orderBy('name')
+            ->get()
+            ->mapWithKeys(fn (Product $p) => [
+                $p->id => ($p->manufacturer?->name ?? '—').' · '.$p->packagingSummary(),
+            ])
             ->all();
     }
 }

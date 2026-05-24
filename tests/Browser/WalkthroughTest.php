@@ -98,7 +98,7 @@ it('klickt sich durch alle Resource-Seiten und prüft Konsolen-Fehler', function
         ->screenshot(filename: '07-members');
 });
 
-it('öffnet die aktive Runde als Dashboard und interagiert mit ihr', function () {
+it('öffnet die aktive Runde, zeigt die Tab-Navigation und Voting-Buttons', function () {
     $this->actingAs($this->marie);
 
     $activeRoundId = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail()->id;
@@ -106,18 +106,23 @@ it('öffnet die aktive Runde als Dashboard und interagiert mit ihr', function ()
     $page = visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}")
         ->assertSee('Frühjahr-Bestellung 2026')
         ->assertSee('Phase: Bestätigung')
-        ->assertSee('Vorschlag A')
-        ->assertSee('Vorschlag B')
-        ->assertSee('Warenkörbe der Teilnehmer')
-        ->assertSee('Bestellvorschläge')
-        ->assertSee('Bio Dinkelmehl Type 630')
+        // Tab-Navigation
+        ->assertSee('Übersicht')
+        ->assertSee('Warenkörbe')
+        ->assertSee('Vorschläge')
+        ->assertSee('Zahlungen & Abholungen')
+        ->assertSee('Aktivitäten & Benachrichtigungen')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '08-round-detail-overview', fullPage: true);
 
-    // Daumen-hoch / runter Buttons sollten sichtbar sein
-    $page->assertSee('👍')
+    // Vorschläge sichtbar nach Klick auf Tab
+    $page->click('Vorschläge')
+        ->wait(1)
+        ->assertSee('Vorschlag A')
+        ->assertSee('Vorschlag B')
+        ->assertSee('👍')
         ->assertSee('👎')
-        ->screenshot(filename: '09-round-detail-voting');
+        ->screenshot(filename: '09-round-detail-proposals', fullPage: true);
 });
 
 it('öffnet das "Artikel hinzufügen"-Modal über den Header', function () {
@@ -149,8 +154,8 @@ it('rendert die abgeschlossene Runde mit Zahlungen und Abholungen', function () 
     $page = visit("/g/speisekammer-schoeneberg/rounds/{$completedRoundId}")
         ->assertSee('Spätsommer-Bestellung 2025')
         ->assertSee('Phase: Abgeschlossen')
-        ->assertSee('Zahlungen')
-        ->assertSee('Abholungen')
+        ->click('Zahlungen & Abholungen')
+        ->wait(1)
         ->assertSee('Bezahlt')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '11-completed-round', fullPage: true);
@@ -165,13 +170,14 @@ it('lässt sich mit dem Tenant-Switcher zur zweiten Gruppe wechseln', function (
         ->screenshot(filename: '12-second-tenant');
 });
 
-it('Bestellrunden-Wizard zeigt vier Schritte mit Hinweistexten', function () {
+it('Bestellrunden-Wizard zeigt fünf Schritte inklusive Sortiment-Auswahl', function () {
     $this->actingAs($this->marie);
 
     $page = visit('/g/speisekammer-schoeneberg/rounds/create')
         ->wait(1)
         ->assertSee('Neue Bestellrunde starten')
         ->assertSee('Worum geht\'s?')
+        ->assertSee('Sortiment')
         ->assertSee('Zeitplan')
         ->assertSee('Abholung')
         ->assertSee('Finanzen')
@@ -196,6 +202,21 @@ it('Produkt-Wizard öffnet sich als Modal mit drei Schritten', function () {
         ->screenshot(filename: '14-product-wizard-step1', fullPage: true);
 });
 
+it('Mein-Warenkorb-Seite listet aktive Bestellrunden mit eigenen Items', function () {
+    $this->actingAs($this->marie);
+
+    // Frühjahr-Runde temporär in Shopping-Phase setzen für sinnvolle Demo
+    Round::where('title', 'Frühjahr-Bestellung 2026')->update(['phase' => 'shopping']);
+
+    $page = visit('/g/speisekammer-schoeneberg/my-cart')
+        ->assertSee('Mein Warenkorb')
+        ->assertSee('Frühjahr-Bestellung 2026')
+        ->assertSee('Bio Dinkelmehl Type 630')
+        ->assertSee('Artikel hinzufügen')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '15-my-cart', fullPage: true);
+});
+
 it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)', function () {
     $this->actingAs($this->marie);
 
@@ -207,6 +228,7 @@ it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)
         "{$base}/products",
         "{$base}/rounds",
         "{$base}/rounds/create",
+        "{$base}/my-cart",
         "{$base}/members",
     ]);
 

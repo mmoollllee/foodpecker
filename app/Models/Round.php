@@ -7,6 +7,7 @@ use App\Concerns\HasAttachments;
 use App\Concerns\HasNotes;
 use App\Enums\RoundPhase;
 use Database\Factories\RoundFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -82,6 +83,24 @@ class Round extends Model
         return $this->belongsToMany(User::class, 'round_participants')
             ->withPivot(['removed', 'remove_reason', 'round_up_to_cents'])
             ->withTimestamps();
+    }
+
+    /**
+     * Vom Lead vorab kuratierte Produktauswahl für diese Runde.
+     * Leere Relation = alle für die Gruppe sichtbaren Produkte sind verfügbar.
+     */
+    public function availableProducts(): BelongsToMany
+    {
+        return $this->belongsToMany(Product::class, 'round_product')->withTimestamps();
+    }
+
+    public function availableProductsForCart(): Builder
+    {
+        if ($this->availableProducts()->exists()) {
+            return $this->availableProducts()->getQuery();
+        }
+
+        return Product::visibleTo($this->group);
     }
 
     public function pickupDates(): HasMany
