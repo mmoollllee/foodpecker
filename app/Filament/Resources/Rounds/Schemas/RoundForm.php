@@ -2,10 +2,11 @@
 
 namespace App\Filament\Resources\Rounds\Schemas;
 
-use App\Enums\RoundPhase;
 use App\Models\Group;
+use App\Models\Product;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -14,6 +15,12 @@ use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
+/**
+ * Form-Schema fürs Bearbeiten der "Eckdaten" einer bereits bestehenden Runde.
+ *
+ * Bewusst _ohne_ phase-Feld — die Phase wird über die dedizierten Actions
+ * "Bestellrunde starten" bzw. "Phase wechseln" verwaltet, nicht hier.
+ */
 class RoundForm
 {
     public static function configure(Schema $schema): Schema
@@ -35,20 +42,14 @@ class RoundForm
                                 return [];
                             }
 
-                            return User::whereIn('id', $group->members()->pluck('users.id')->push($group->owner_id))
+                            return User::whereIn('id', $group->members()->pluck('users.id')->push($group->owner_id)->unique())
                                 ->orderBy('first_name')
                                 ->get()
                                 ->mapWithKeys(fn (User $u) => [$u->id => $u->fullName().' · '.$u->email])
                                 ->all();
                         })
                         ->default(fn () => auth()->id())
-                        ->required(),
-                    Select::make('phase')
-                        ->label('Phase')
-                        ->options(RoundPhase::class)
-                        ->default(RoundPhase::Draft->value)
-                        ->disabled(fn (?string $operation) => $operation === 'create')
-                        ->dehydratedWhenHidden()
+                        ->searchable()
                         ->required(),
                     Textarea::make('description')
                         ->label('Beschreibung / Notizen für die Teilnehmer')
@@ -56,22 +57,50 @@ class RoundForm
                         ->columnSpanFull(),
                 ])->columns(3),
 
+            Section::make('Sortiment')
+                ->description('Welche Produkte sind in dieser Runde bestellbar? Leer lassen = alle für die Gruppe sichtbaren Produkte.')
+                ->schema([
+                    CheckboxList::make('available_products')
+                        ->relationship('availableProducts', 'name')
+                        ->options(fn () => Product::visibleTo(Filament::getTenant())
+                            ->with('manufacturer')
+                            ->orderBy('name')
+                            ->get()
+                            ->mapWithKeys(fn (Product $p) => [$p->id => $p->name])
+                            ->all())
+                        ->descriptions(fn () => Product::visibleTo(Filament::getTenant())
+                            ->with('manufacturer')
+                            ->orderBy('name')
+                            ->get()
+                            ->mapWithKeys(fn (Product $p) => [$p->id => ($p->manufacturer?->name ?? '—').' · '.$p->packagingSummary()])
+                            ->all())
+                        ->columns(2)
+                        ->bulkToggleable()
+                        ->hiddenLabel()
+                        ->columnSpanFull(),
+                ])->collapsed()->collapsible(),
+
             Section::make('Deadlines')
                 ->schema([
                     DatePicker::make('shopping_deadline')
                         ->label('Ende Einkaufsphase')
+                        ->displayFormat('d.m.Y')
                         ->native(false),
                     DatePicker::make('negotiation_deadline')
                         ->label('Ende Verhandlung')
+                        ->displayFormat('d.m.Y')
                         ->native(false),
                     DatePicker::make('finalization_deadline')
                         ->label('Ende Bestätigung')
+                        ->displayFormat('d.m.Y')
                         ->native(false),
                     DatePicker::make('payment_deadline')
                         ->label('Ende Zahlung')
+                        ->displayFormat('d.m.Y')
                         ->native(false),
                     DatePicker::make('expected_delivery')
                         ->label('Voraussichtliche Lieferung')
+                        ->displayFormat('d.m.Y')
                         ->native(false),
                 ])->columns(3)->collapsible(),
 
@@ -93,6 +122,7 @@ class RoundForm
                             DatePicker::make('scheduled_at')
                                 ->label('Termin')
                                 ->required()
+                                ->displayFormat('d.m.Y')
                                 ->native(false),
                             TextInput::make('location')
                                 ->label('Spezifischer Ort (optional)'),

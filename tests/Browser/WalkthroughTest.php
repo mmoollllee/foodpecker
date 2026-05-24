@@ -203,6 +203,31 @@ it('Produkt-Wizard öffnet sich als Modal mit drei Schritten', function () {
         ->screenshot(filename: '14-product-wizard-step1', fullPage: true);
 });
 
+it('Eckdaten bearbeiten lädt Lead und Pickup-Termine vor und speichert sie ohne Verlust', function () {
+    $this->actingAs($this->marie);
+    $activeRoundId = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail()->id;
+    $pickupCountBefore = PickupDate::where('round_id', $activeRoundId)->count();
+    expect($pickupCountBefore)->toBeGreaterThanOrEqual(3); // aus dem Seeder
+
+    $page = visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}")
+        ->press('Eckdaten bearbeiten')
+        ->wait(1)
+        // Lead-Feld muss vorbefüllt sein
+        ->assertSee('Marie Kerres')
+        // Pickup-Termine müssen im Repeater sichtbar sein (mind. einer)
+        ->assertSee('Abholtermine')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '18-edit-round-prefilled', fullPage: true);
+
+    // Speichern → Modal schließt, Werte bleiben in der DB
+    $page->press('Speichern')
+        ->wait(2);
+
+    $round = Round::with('pickupDates')->find($activeRoundId);
+    expect($round->lead_user_id)->toBe($this->marie->id);
+    expect($round->pickupDates->count())->toBe($pickupCountBefore);
+});
+
 it('Draft-Runde ist nur für den Lead sichtbar und zeigt den "Bestellrunde starten"-Button', function () {
     $marie = $this->marie;
     $tobias = User::where('email', 'tobias@foodpecker.test')->firstOrFail();

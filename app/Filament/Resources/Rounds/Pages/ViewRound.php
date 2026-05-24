@@ -100,8 +100,8 @@ class ViewRound extends Page
             $this->advancePhaseAction(),
             $this->addCartItemAction(),
             $this->createProposalAction(),
+            $this->editRoundAction(),
             ActionGroup::make([
-                $this->editRoundAction(),
                 $this->managePickupDatesAction(),
                 $this->addParticipantAction(),
                 $this->generateNotificationAction(),
@@ -182,15 +182,25 @@ class ViewRound extends Page
         return Action::make('editRound')
             ->label('Eckdaten bearbeiten')
             ->icon('heroicon-o-pencil-square')
-            ->slideOver()
-            ->fillForm(fn () => $this->round->only([
-                'title', 'description', 'shopping_deadline', 'negotiation_deadline',
-                'finalization_deadline', 'payment_deadline', 'expected_delivery',
-                'pickup_location', 'max_participants', 'lead_fee_percent', 'platform_fee_percent',
-            ]))
+            ->color('gray')
+            ->outlined()
+            ->modalWidth('5xl')
+            ->modalSubmitActionLabel('Speichern')
+            ->record(fn () => $this->round)
+            ->fillForm(fn (Round $record) => array_merge(
+                $record->attributesToArray(),
+                [
+                    'pickupDates' => $record->pickupDates->map(fn ($d) => [
+                        'scheduled_at' => $d->scheduled_at,
+                        'location' => $d->location,
+                        'notes' => $d->notes,
+                    ])->all(),
+                    'available_products' => $record->availableProducts->pluck('id')->all(),
+                ],
+            ))
             ->schema(RoundForm::configure(Schema::make())->getComponents())
-            ->action(function (array $data): void {
-                $this->round->update($data);
+            ->action(function (array $data, Round $record): void {
+                $record->update(collect($data)->except(['available_products', 'pickupDates'])->all());
                 Notification::make()->title('Bestellrunde aktualisiert.')->success()->send();
                 $this->refreshRound();
             });
