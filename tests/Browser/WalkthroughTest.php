@@ -265,7 +265,7 @@ it('Draft-Runde ist nur für den Lead sichtbar und zeigt den "Bestellrunde start
         ->screenshot(filename: '17-round-draft-other-user');
 });
 
-it('Mein-Warenkorb-Seite listet aktive Bestellrunden mit eigenen Items', function () {
+it('Mein-Warenkorb-Seite listet aktive Bestellrunden und öffnet Modal ohne BindingError', function () {
     $this->actingAs($this->marie);
 
     // Frühjahr-Runde temporär in Shopping-Phase setzen für sinnvolle Demo
@@ -278,6 +278,14 @@ it('Mein-Warenkorb-Seite listet aktive Bestellrunden mit eigenen Items', functio
         ->assertSee('Artikel hinzufügen')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '15-my-cart', fullPage: true);
+
+    // Modal öffnet sauber — Regression-Test für BindingResolutionException beim Schema-Closure
+    $page->press('Artikel hinzufügen')
+        ->wait(1)
+        ->assertSee('Mengenangabe')
+        ->assertSee('Produkt')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '19-my-cart-add-modal', fullPage: true);
 });
 
 it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)', function () {

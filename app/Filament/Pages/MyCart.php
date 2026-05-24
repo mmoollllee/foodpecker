@@ -42,6 +42,15 @@ class MyCart extends Page implements HasActions, HasSchemas
 
     protected static ?int $navigationSort = 2;
 
+    /**
+     * Round-ID, an die die aktuell offene Add/Edit-Action gebunden ist.
+     * Wird in mountUsing() aus den Action-Arguments gesetzt — `$arguments` ist
+     * in Schema-Component-Closures nicht direkt verfügbar.
+     */
+    public ?int $contextRoundId = null;
+
+    public ?int $contextCartItemId = null;
+
     public function getTitle(): string|Htmlable
     {
         return 'Mein Warenkorb';
@@ -58,17 +67,19 @@ class MyCart extends Page implements HasActions, HasSchemas
             ->label('Artikel hinzufügen')
             ->icon(Heroicon::Plus)
             ->color('primary')
-            ->modalHeading(fn (array $arguments) => 'Artikel zu „'.($this->roundFor((int) ($arguments['round_id'] ?? 0))?->title ?? '').'" hinzufügen')
+            ->mountUsing(function (array $arguments): void {
+                $this->contextRoundId = (int) ($arguments['round_id'] ?? 0);
+            })
+            ->modalHeading(fn (): string => 'Artikel zu „'.($this->contextRound()?->title ?? '').'" hinzufügen')
+            ->modalSubmitActionLabel('Speichern')
             ->schema([
                 Select::make('product_id')
                     ->label('Produkt')
-                    ->options(function (array $arguments) {
-                        $round = $this->roundFor((int) $arguments['round_id']);
-
-                        return $round
-                            ? $round->availableProductsForCart()->orderBy('name')->pluck('name', 'products.id')->all()
-                            : [];
-                    })
+                    ->options(fn (): array => $this->contextRound()
+                        ?->availableProductsForCart()
+                        ->orderBy('name')
+                        ->pluck('name', 'products.id')
+                        ->all() ?? [])
                     ->searchable()
                     ->preload()
                     ->required(),
@@ -101,8 +112,11 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->label('Notiz (optional)')
                     ->rows(2),
             ])
-            ->action(function (array $data, array $arguments): void {
-                $roundId = (int) $arguments['round_id'];
+            ->action(function (array $data): void {
+                $roundId = (int) $this->contextRoundId;
+                if ($roundId === 0) {
+                    return;
+                }
                 CartItem::updateOrCreate(
                     [
                         'round_id' => $roundId,
@@ -127,8 +141,12 @@ class MyCart extends Page implements HasActions, HasSchemas
             ->color('gray')
             ->size('xs')
             ->modalHeading('Artikel bearbeiten')
-            ->fillForm(function (array $arguments): array {
-                $item = CartItem::find((int) ($arguments['cart_item_id'] ?? 0));
+            ->modalSubmitActionLabel('Speichern')
+            ->mountUsing(function (array $arguments): void {
+                $this->contextCartItemId = (int) ($arguments['cart_item_id'] ?? 0);
+            })
+            ->fillForm(function (): array {
+                $item = CartItem::find($this->contextCartItemId);
 
                 return $item ? $item->only([
                     'product_id', 'quantity_mode', 'exact_quantity', 'min_quantity', 'max_quantity', 'notes',
@@ -139,7 +157,7 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->label('Produkt')
                     ->disabled()
                     ->dehydrated(false)
-                    ->options(fn () => Product::pluck('name', 'id')),
+                    ->options(fn (): array => Product::pluck('name', 'id')->all()),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
                     ->options(QuantityMode::class)
@@ -163,8 +181,8 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 Textarea::make('notes')->label('Notiz')->rows(2),
             ])
-            ->action(function (array $data, array $arguments): void {
-                $item = CartItem::find((int) ($arguments['cart_item_id'] ?? 0));
+            ->action(function (array $data): void {
+                $item = CartItem::find($this->contextCartItemId);
                 if ($item) {
                     $item->update($data);
                     Notification::make()->title('Artikel aktualisiert.')->success()->send();
@@ -181,9 +199,9 @@ class MyCart extends Page implements HasActions, HasSchemas
         }
     }
 
-    public function roundFor(int $id): ?Round
+    public function contextRound(): ?Round
     {
-        return Round::find($id);
+        return $this->contextRoundId ? Round::find($this->contextRoundId) : null;
     }
 
     public function getViewData(): array

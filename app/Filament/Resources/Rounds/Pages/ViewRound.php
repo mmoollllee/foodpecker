@@ -385,6 +385,8 @@ class ViewRound extends Page
             });
     }
 
+    public ?int $contextDraftId = null;
+
     public function editDraftAction(): Action
     {
         return Action::make('editDraft')
@@ -395,8 +397,12 @@ class ViewRound extends Page
             ->modalHeading('Benachrichtigungs-Entwurf bearbeiten')
             ->modalDescription('Pass Betreff und Text an. Sobald du speicherst, ist der Entwurf bereit zum Versand.')
             ->modalWidth('3xl')
-            ->fillForm(function (array $arguments): array {
-                $draft = $this->round->notificationDrafts()->find((int) ($arguments['draft_id'] ?? 0));
+            ->modalSubmitActionLabel('Speichern')
+            ->mountUsing(function (array $arguments): void {
+                $this->contextDraftId = (int) ($arguments['draft_id'] ?? 0);
+            })
+            ->fillForm(function (): array {
+                $draft = $this->round->notificationDrafts()->find($this->contextDraftId);
 
                 return $draft ? $draft->only(['subject', 'body']) : [];
             })
@@ -411,8 +417,8 @@ class ViewRound extends Page
                     ->rows(18)
                     ->helperText('Markdown unterstützt — Überschriften (#), Listen (-), Fett (**…**). Wird beim Versenden als E-Mail-Text genutzt.'),
             ])
-            ->action(function (array $data, array $arguments): void {
-                $draft = $this->round->notificationDrafts()->find((int) ($arguments['draft_id'] ?? 0));
+            ->action(function (array $data): void {
+                $draft = $this->round->notificationDrafts()->find($this->contextDraftId);
                 if ($draft) {
                     $draft->update($data);
                     Notification::make()->title('Entwurf gespeichert.')->success()->send();
