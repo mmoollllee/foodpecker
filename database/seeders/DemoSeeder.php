@@ -520,6 +520,65 @@ class DemoSeeder extends Seeder
         $proposalA->logActivity('created');
         $proposalB->logActivity('created');
 
+        // ---------------- Shopping-Runde (Sommer 2026, Phase shopping) ----------------
+        // Tobias ist Lead; alle anderen haben schon gefüllte Warenkörbe.
+        // Marie hat erst _ein_ Produkt drin — passt zur Aufgabenliste auf dem Dashboard.
+        $shopping = Round::create([
+            'group_id' => $schoeneberg->id,
+            'lead_user_id' => $tobias->id,
+            'title' => 'Sommer-Bestellung 2026',
+            'phase' => RoundPhase::Shopping,
+            'shopping_deadline' => '2026-06-15',
+            'negotiation_deadline' => '2026-06-22',
+            'finalization_deadline' => '2026-07-01',
+            'payment_deadline' => '2026-07-08',
+            'expected_delivery' => '2026-07-22',
+            'pickup_location' => 'Hauptstraße 42, 10827 Berlin · Hinterhof, Keller links',
+            'max_participants' => 8,
+            'lead_fee_percent' => 2.5,
+            'platform_fee_percent' => 1.0,
+            'phase_changed_at' => Carbon::parse('2026-05-20 09:00'),
+            'description' => 'Großeinkauf für Sommer + Spätsommer. Bitte bis zum 15.06. die Warenkörbe füllen, danach hole ich Hersteller-Preise ein.',
+        ]);
+
+        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-23 18:00', 'location' => 'Speisekammer, Keller links']);
+        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-25 18:30', 'location' => 'Speisekammer, Keller links']);
+
+        foreach ([$marie, $tobias, $sara, $linus, $aylin, $jonas] as $u) {
+            RoundParticipant::create(['round_id' => $shopping->id, 'user_id' => $u->id]);
+        }
+
+        // Marie: erst _ein_ Produkt → Aufgabe „Warenkorb füllen" bleibt sichtbar
+        $this->cartExact($shopping, $marie, $dinkelmehl, 3);
+
+        // Andere haben bereits substanzielle Warenkörbe
+        $this->cartExact($shopping, $tobias, $dinkelmehl, 8);
+        $this->cartExact($shopping, $tobias, $reis, 15);
+        $this->cartFlex($shopping, $tobias, $polenta, 5, 10);
+        $this->cartExact($shopping, $tobias, $spirelli, 3);
+        $this->cartExact($shopping, $tobias, $senf, 6);
+
+        $this->cartFlex($shopping, $sara, $dinkelmehl, 2, 6);
+        $this->cartExact($shopping, $sara, $hafer, 8);
+        $this->cartExact($shopping, $sara, $senf, 4);
+        $this->cartFlex($shopping, $sara, $spaghetti, 2, 5);
+
+        $this->cartFlex($shopping, $linus, $reis, 8, 20);
+        $this->cartExact($shopping, $linus, $spaghetti, 6);
+        $this->cartFlex($shopping, $linus, $hafer, 3, 8);
+        $this->cartExact($shopping, $linus, $polenta, 5);
+
+        $this->cartFlex($shopping, $aylin, $dinkelmehl, 3, 6);
+        $this->cartExact($shopping, $aylin, $senf, 3);
+        $this->cartFlex($shopping, $aylin, $spirelli, 2, 4);
+        $this->cartExact($shopping, $aylin, $reis, 5);
+
+        $this->cartFlex($shopping, $jonas, $reis, 4, 12);
+        $this->cartExact($shopping, $jonas, $polenta, 3);
+        $this->cartFlex($shopping, $jonas, $hafer, 2, 5);
+
+        $shopping->logActivity('phase_changed', ['from' => 'draft', 'to' => 'shopping']);
+
         // ---------------- Offene Einladung ----------------
         $schoeneberg->invitations()->create([
             'email' => 'sandra@foodpecker.test',
