@@ -35,6 +35,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 class ViewRound extends Page
 {
@@ -95,6 +96,7 @@ class ViewRound extends Page
     protected function getHeaderActions(): array
     {
         return [
+            $this->startRoundAction(),
             $this->advancePhaseAction(),
             $this->addCartItemAction(),
             $this->createProposalAction(),
@@ -105,6 +107,39 @@ class ViewRound extends Page
                 $this->generateNotificationAction(),
             ])->label('Weitere Aktionen')->icon('heroicon-o-bars-3'),
         ];
+    }
+
+    public function startRoundAction(): Action
+    {
+        return Action::make('startRound')
+            ->label('Bestellrunde starten')
+            ->icon('heroicon-o-play')
+            ->color('success')
+            ->visible(fn (): bool => $this->round->phase === RoundPhase::Draft)
+            ->requiresConfirmation()
+            ->modalHeading('Bestellrunde starten?')
+            ->modalDescription('Die Einkaufsphase wird sofort eröffnet, alle Mitglieder können die Runde dann sehen und Warenkörbe füllen. Voraussetzung: mindestens ein Abholtermin und ein Abholort sind hinterlegt.')
+            ->modalSubmitActionLabel('Ja, jetzt starten')
+            ->action(function (): void {
+                try {
+                    app(PhaseTransitioner::class)->transition(
+                        $this->round,
+                        RoundPhase::Shopping,
+                        auth()->user(),
+                        'Runde aus Entwurf gestartet.',
+                    );
+                    Notification::make()
+                        ->title('Bestellrunde gestartet 🎉')
+                        ->body('Die Einkaufsphase ist offen — denk dran, die Gruppe per Benachrichtigung zu informieren.')
+                        ->success()->send();
+                } catch (ValidationException $e) {
+                    Notification::make()
+                        ->title('Start nicht möglich')
+                        ->body(collect($e->errors())->flatten()->first() ?? 'Bitte erst Abholort und mindestens einen Abholtermin hinterlegen.')
+                        ->danger()->send();
+                }
+                $this->refreshRound();
+            });
     }
 
     /* ---------- Actions ---------- */
@@ -120,7 +155,7 @@ class ViewRound extends Page
             ->label('Phase wechseln')
             ->icon('heroicon-o-forward')
             ->color('amber')
-            ->visible(fn () => ! empty($options))
+            ->visible(fn (): bool => $this->round->phase !== RoundPhase::Draft && ! empty($options))
             ->schema([
                 Select::make('phase')
                     ->label('Neue Phase')

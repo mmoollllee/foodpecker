@@ -30,8 +30,14 @@ class ActiveRounds extends BaseWidget
         return $table
             ->query(function (): Builder {
                 $tenant = Filament::getTenant();
+                $userId = auth()->id();
                 $query = Round::query()
                     ->whereNotIn('phase', [RoundPhase::Completed->value, RoundPhase::Cancelled->value])
+                    ->where(function (Builder $q) use ($userId): void {
+                        // Drafts nur für den eigenen Lead sichtbar
+                        $q->where('phase', '!=', RoundPhase::Draft->value)
+                            ->orWhere('lead_user_id', $userId);
+                    })
                     ->latest('updated_at');
                 if ($tenant instanceof Group) {
                     $query->where('group_id', $tenant->id);

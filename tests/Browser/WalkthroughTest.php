@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\PickupDate;
 use App\Models\Round;
 use App\Models\User;
 use Database\Seeders\DemoSeeder;
@@ -200,6 +201,43 @@ it('Produkt-Wizard öffnet sich als Modal mit drei Schritten', function () {
         ->assertSee('Produktname')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '14-product-wizard-step1', fullPage: true);
+});
+
+it('Draft-Runde ist nur für den Lead sichtbar und zeigt den "Bestellrunde starten"-Button', function () {
+    $marie = $this->marie;
+    $tobias = User::where('email', 'tobias@foodpecker.test')->firstOrFail();
+    $group = $marie->ownedGroups()->firstOrFail();
+
+    $draft = Round::create([
+        'group_id' => $group->id,
+        'lead_user_id' => $marie->id,
+        'title' => 'Test-Draft Sommer 2026',
+        'phase' => 'draft',
+        'pickup_location' => 'Hauptstraße 42, 10827 Berlin',
+        'lead_fee_percent' => 2.5,
+        'platform_fee_percent' => 1.0,
+    ]);
+    PickupDate::create([
+        'round_id' => $draft->id,
+        'scheduled_at' => now()->addDays(20),
+        'location' => 'Speisekammer',
+    ]);
+
+    // Marie sieht den Draft + "Bestellrunde starten"
+    $this->actingAs($marie);
+    visit("/g/speisekammer-schoeneberg/rounds/{$draft->id}")
+        ->assertSee('Test-Draft Sommer 2026')
+        ->assertSee('Entwurf')
+        ->assertSee('Bestellrunde starten')
+        ->assertDontSee('Phase wechseln')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '16-round-draft-as-lead', fullPage: true);
+
+    // Tobias darf den Draft nicht öffnen — sollte 404 oder Redirect bekommen
+    $this->actingAs($tobias);
+    $tobiasView = visit("/g/speisekammer-schoeneberg/rounds/{$draft->id}");
+    $tobiasView->assertDontSee('Test-Draft Sommer 2026')
+        ->screenshot(filename: '17-round-draft-other-user');
 });
 
 it('Mein-Warenkorb-Seite listet aktive Bestellrunden mit eigenen Items', function () {

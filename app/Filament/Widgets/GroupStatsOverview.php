@@ -24,8 +24,13 @@ class GroupStatsOverview extends BaseWidget
             return [];
         }
 
+        $userId = auth()->id();
         $activeRounds = Round::where('group_id', $tenant->id)
             ->whereNotIn('phase', [RoundPhase::Completed->value, RoundPhase::Cancelled->value])
+            ->where(function ($q) use ($userId): void {
+                $q->where('phase', '!=', RoundPhase::Draft->value)
+                    ->orWhere('lead_user_id', $userId);
+            })
             ->count();
 
         $completedRounds = Round::where('group_id', $tenant->id)

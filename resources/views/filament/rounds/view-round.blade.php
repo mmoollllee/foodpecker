@@ -30,10 +30,16 @@
 
 <x-filament-panels::page>
     {{-- Phase-Fortschrittsbalken (immer sichtbar oben) --}}
-    <x-filament::section :heading="'Phase: ' . $round->phase->getLabel()">
+    <x-filament::section :heading="$round->phase === RoundPhase::Draft ? 'Entwurf' : 'Phase: ' . $round->phase->getLabel()">
+        @if ($round->phase === RoundPhase::Draft)
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300 mb-3">
+                Diese Bestellrunde ist noch nicht für die Gruppe sichtbar. Sobald du sie startest, sehen alle Mitglieder die Runde und können Warenkörbe füllen.
+            </div>
+        @endif
+
         <div class="flex flex-wrap gap-2">
             @foreach (RoundPhase::cases() as $phase)
-                @if ($phase === RoundPhase::Cancelled) @continue @endif
+                @if (in_array($phase, [RoundPhase::Draft, RoundPhase::Cancelled], true)) @continue @endif
                 @php
                     $active = $phase === $round->phase;
                     $passed = $phase->order() < $round->phase->order();

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Rounds;
 
+use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\Pages\CreateRound;
 use App\Filament\Resources\Rounds\Pages\ListRounds;
 use App\Filament\Resources\Rounds\Pages\ViewRound;
@@ -13,6 +14,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 class RoundResource extends Resource
@@ -44,6 +46,24 @@ class RoundResource extends Resource
     public static function getRecordTitle(?Model $record): ?string
     {
         return $record?->title;
+    }
+
+    /**
+     * Drafts sind privat — nur der Lead sieht seine eigenen Entwürfe.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+
+        $userId = auth()->id();
+        if ($userId === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $q) use ($userId): void {
+            $q->where('phase', '!=', RoundPhase::Draft->value)
+                ->orWhere('lead_user_id', $userId);
+        });
     }
 
     public static function getPages(): array
