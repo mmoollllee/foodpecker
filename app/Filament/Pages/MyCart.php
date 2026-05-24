@@ -15,6 +15,7 @@ use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -63,6 +64,10 @@ class MyCart extends Page implements HasActions, HasSchemas
 
     public function addItemAction(): Action
     {
+        $modeOptions = collect(QuantityMode::cases())
+            ->mapWithKeys(fn (QuantityMode $m) => [$m->value => $m->getLabel()])
+            ->all();
+
         return Action::make('addItem')
             ->label('Artikel hinzufügen')
             ->icon(Heroicon::Plus)
@@ -72,20 +77,20 @@ class MyCart extends Page implements HasActions, HasSchemas
             })
             ->modalHeading(fn (): string => 'Artikel zu „'.($this->contextRound()?->title ?? '').'" hinzufügen')
             ->modalSubmitActionLabel('Speichern')
+            ->fillForm(fn (array $arguments): array => [
+                'round_id' => (int) ($arguments['round_id'] ?? $this->contextRoundId ?? 0),
+                'quantity_mode' => QuantityMode::Exact->value,
+            ])
             ->schema([
+                Hidden::make('round_id'),
                 Select::make('product_id')
                     ->label('Produkt')
-                    ->options(fn (): array => $this->contextRound()
-                        ?->availableProductsForCart()
-                        ->orderBy('name')
-                        ->pluck('name', 'products.id')
-                        ->all() ?? [])
-                    ->searchable()
+                    ->options(fn (Get $get): array => $this->productOptionsForRound((int) $get('round_id')))
                     ->preload()
                     ->required(),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
-                    ->options(QuantityMode::class)
+                    ->options($modeOptions)
                     ->default(QuantityMode::Exact->value)
                     ->required()
                     ->inline()
@@ -113,17 +118,18 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->rows(2),
             ])
             ->action(function (array $data): void {
-                $roundId = (int) $this->contextRoundId;
+                $roundId = (int) ($data['round_id'] ?? $this->contextRoundId ?? 0);
                 if ($roundId === 0) {
                     return;
                 }
+                $payload = collect($data)->except('round_id')->all();
                 CartItem::updateOrCreate(
                     [
                         'round_id' => $roundId,
                         'user_id' => auth()->id(),
-                        'product_id' => $data['product_id'],
+                        'product_id' => $payload['product_id'],
                     ],
-                    $data,
+                    $payload,
                 );
                 RoundParticipant::firstOrCreate([
                     'round_id' => $roundId,
@@ -133,8 +139,25 @@ class MyCart extends Page implements HasActions, HasSchemas
             });
     }
 
+    /** @return array<int, string> */
+    private function productOptionsForRound(int $roundId): array
+    {
+        if ($roundId === 0) {
+            return [];
+        }
+        $round = Round::find($roundId);
+
+        return $round
+            ? $round->availableProductsForCart()->orderBy('name')->pluck('name', 'products.id')->all()
+            : [];
+    }
+
     public function editItemAction(): Action
     {
+        $modeOptions = collect(QuantityMode::cases())
+            ->mapWithKeys(fn (QuantityMode $m) => [$m->value => $m->getLabel()])
+            ->all();
+
         return Action::make('editItem')
             ->label('Bearbeiten')
             ->icon(Heroicon::PencilSquare)
@@ -147,10 +170,19 @@ class MyCart extends Page implements HasActions, HasSchemas
             })
             ->fillForm(function (): array {
                 $item = CartItem::find($this->contextCartItemId);
+                if (! $item) {
+                    return [];
+                }
 
-                return $item ? $item->only([
-                    'product_id', 'quantity_mode', 'exact_quantity', 'min_quantity', 'max_quantity', 'notes',
-                ]) : [];
+                $data = $item->only([
+                    'product_id', 'exact_quantity', 'min_quantity', 'max_quantity', 'notes',
+                ]);
+                // Enum-Cast → String, damit ToggleButtons den state mit === vergleichen kann
+                $data['quantity_mode'] = $item->quantity_mode instanceof QuantityMode
+                    ? $item->quantity_mode->value
+                    : $item->quantity_mode;
+
+                return $data;
             })
             ->schema([
                 Select::make('product_id')
@@ -160,7 +192,7 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->options(fn (): array => Product::pluck('name', 'id')->all()),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
-                    ->options(QuantityMode::class)
+                    ->options($modeOptions)
                     ->required()
                     ->inline()
                     ->live(),
