@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\ProductCategory;
 use App\Enums\QuantityMode;
 use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\RoundResource;
@@ -27,6 +28,7 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Support\Collection;
 
 class MyCart extends Page implements HasActions, HasSchemas
 {
@@ -75,8 +77,23 @@ class MyCart extends Page implements HasActions, HasSchemas
             ->mountUsing(function (array $arguments): void {
                 $this->contextRoundId = (int) ($arguments['round_id'] ?? 0);
             })
-            ->modalHeading(fn (): string => 'Artikel zu „'.($this->contextRound()?->title ?? '').'" hinzufügen')
-            ->modalSubmitActionLabel('Speichern')
+            ->modalHeading(function (array $arguments): string {
+                $round = $this->roundFromArguments($arguments);
+
+                return 'Artikel zu „'.($round?->title ?? 'Bestellrunde').'" hinzufügen';
+            })
+            ->modalDescription(function (array $arguments): ?string {
+                $round = $this->roundFromArguments($arguments);
+                if (! $round) {
+                    return null;
+                }
+                $deadline = $round->shopping_deadline?->format('d.m.Y');
+
+                return 'Lead: '.($round->lead?->fullName() ?? '—')
+                    .($deadline ? ' · Einkauf bis '.$deadline : '')
+                    .' · Alle Teilnehmer der Gruppe sehen, was du in den Korb legst.';
+            })
+            ->modalSubmitActionLabel('In Warenkorb legen')
             ->fillForm(fn (array $arguments): array => [
                 'round_id' => (int) ($arguments['round_id'] ?? $this->contextRoundId ?? 0),
                 'quantity_mode' => QuantityMode::Exact->value,
@@ -85,9 +102,11 @@ class MyCart extends Page implements HasActions, HasSchemas
                 Hidden::make('round_id'),
                 Select::make('product_id')
                     ->label('Produkt')
-                    ->options(fn (Get $get): array => $this->productOptionsForRound((int) $get('round_id')))
+                    ->options(fn (Get $get): array => $this->groupedProductOptionsForRound((int) $get('round_id')))
+                    ->searchable()
                     ->preload()
-                    ->required(),
+                    ->required()
+                    ->helperText('Sortiert nach Kategorie. Hersteller steht hinter dem Produktnamen.'),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
                     ->options($modeOptions)
@@ -150,6 +169,62 @@ class MyCart extends Page implements HasActions, HasSchemas
         return $round
             ? $round->availableProductsForCart()->orderBy('name')->pluck('name', 'products.id')->all()
             : [];
+    }
+
+    /**
+     * Nach Kategorie gruppierte Optionen mit Hersteller-Suffix als Label.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function groupedProductOptionsForRound(int $roundId): array
+    {
+        if ($roundId === 0) {
+            return [];
+        }
+        $round = Round::find($roundId);
+        if (! $round) {
+            return [];
+        }
+
+        /** @var Collection<int, Product> $products */
+        $products = $round->availableProductsForCart()
+            ->with('manufacturer')
+            ->get(['products.id', 'products.name', 'products.category', 'products.manufacturer_id']);
+
+        $grouped = [];
+        foreach ($products as $product) {
+            $category = $product->category;
+            $groupLabel = $category instanceof ProductCategory
+                ? $category->getLabel()
+                : 'Sonstiges';
+            $sort = $category instanceof ProductCategory ? $category->sortOrder() : 99;
+            $key = sprintf('%02d_%s', $sort, $groupLabel);
+
+            $manufacturer = $product->manufacturer?->name;
+            $label = $manufacturer ? $product->name.' · '.$manufacturer : $product->name;
+            $grouped[$key][$product->id] = $label;
+        }
+
+        ksort($grouped);
+        // Sort-Prefix wieder entfernen
+        $result = [];
+        foreach ($grouped as $key => $items) {
+            $label = preg_replace('/^\d+_/', '', $key);
+            asort($items);
+            $result[$label] = $items;
+        }
+
+        return $result;
+    }
+
+    private function roundFromArguments(array $arguments): ?Round
+    {
+        $id = (int) ($arguments['round_id'] ?? $this->contextRoundId ?? 0);
+        if ($id === 0) {
+            return null;
+        }
+
+        return Round::with('lead')->find($id);
     }
 
     public function editItemAction(): Action

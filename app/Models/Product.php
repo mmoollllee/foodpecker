@@ -6,6 +6,7 @@ use App\Concerns\HasActivities;
 use App\Concerns\HasAttachments;
 use App\Concerns\HasNotes;
 use App\Enums\PackagingStrategy;
+use App\Enums\ProductCategory;
 use App\Enums\Visibility;
 use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -28,6 +29,7 @@ class Product extends Model
         'slug',
         'visibility',
         'unit',
+        'category',
         'packaging_strategy',
         'description',
         'estimated_price_cents',
@@ -38,6 +40,7 @@ class Product extends Model
     {
         return [
             'visibility' => Visibility::class,
+            'category' => ProductCategory::class,
             'packaging_strategy' => PackagingStrategy::class,
             'estimated_price_per_unit' => 'decimal:4',
         ];

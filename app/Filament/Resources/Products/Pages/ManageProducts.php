@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Products\Pages;
 
 use App\Enums\PackagingStrategy;
+use App\Enums\ProductCategory;
 use App\Enums\Visibility;
 use App\Filament\Resources\Products\ProductResource;
 use App\Models\Manufacturer;
@@ -67,6 +68,11 @@ class ManageProducts extends ManageRecords
                                 ->default('kg')
                                 ->required()
                                 ->helperText('In welcher Einheit denkt ihr beim Bestellen? Meist Kilogramm, manchmal Stück oder Glas.'),
+                            Select::make('category')
+                                ->label('Kategorie')
+                                ->options(ProductCategory::class)
+                                ->searchable()
+                                ->helperText('Gruppiert die Produktauswahl im Warenkorb.'),
                             Select::make('visibility')
                                 ->label('Sichtbarkeit')
                                 ->options(Visibility::class)

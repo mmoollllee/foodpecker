@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Enums\GroupRole;
 use App\Enums\PackagingStrategy;
 use App\Enums\PaymentStatus;
+use App\Enums\ProductCategory;
 use App\Enums\ProposalStatus;
 use App\Enums\QuantityMode;
 use App\Enums\RoundPhase;
@@ -161,6 +162,7 @@ class DemoSeeder extends Seeder
             'name' => 'Bio Dinkelmehl Type 630',
             'slug' => 'bio-dinkelmehl-630',
             'unit' => 'kg',
+            'category' => ProductCategory::Flours,
             'packaging_strategy' => PackagingStrategy::Tiered,
             'estimated_price_cents' => 4800,
             'description' => 'Hell vermahlen, hervorragend zum Brotbacken und für Pasta. Sehr beliebt.',
@@ -176,6 +178,7 @@ class DemoSeeder extends Seeder
             'name' => 'Bio Basmati Reis',
             'slug' => 'bio-basmati-reis',
             'unit' => 'kg',
+            'category' => ProductCategory::Grains,
             'packaging_strategy' => PackagingStrategy::Tiered,
             'estimated_price_cents' => 5500,
             'description' => 'Bio-Reis aus fairer Kooperation, lange Körner.',
@@ -192,6 +195,7 @@ class DemoSeeder extends Seeder
             'name' => 'Düsseldorfer Senf scharf',
             'slug' => 'duesseldorfer-senf-scharf',
             'unit' => 'glas',
+            'category' => ProductCategory::Condiments,
             'packaging_strategy' => PackagingStrategy::PaletteDivisible,
             'estimated_price_cents' => 360,
             'description' => '250 g Gläser. Verkauft nur palettenweise — 1 Palette = 8 × 12er-Karton.',
@@ -206,6 +210,7 @@ class DemoSeeder extends Seeder
             'name' => 'Spaghetti N. 5 (Bronzeziehung)',
             'slug' => 'spaghetti-bronze',
             'unit' => 'kg',
+            'category' => ProductCategory::Pasta,
             'packaging_strategy' => PackagingStrategy::MultiSizeIndivisible,
             'estimated_price_cents' => 320,
             'description' => 'Aus 100 % Hartweizen. 250-g-Packungen praktisch für Singles, 2-kg-Beutel für große Haushalte.',
@@ -221,6 +226,7 @@ class DemoSeeder extends Seeder
             'name' => 'Spirelli aus Hartweizen',
             'slug' => 'spirelli-hartweizen',
             'unit' => 'kg',
+            'category' => ProductCategory::Pasta,
             'packaging_strategy' => PackagingStrategy::BulkWeighable,
             'estimated_price_cents' => 1850,
             'description' => 'Klassische Spiralen, in 5 kg Kartons. Innerhalb des Kartons frei abwiegbar.',
@@ -235,6 +241,7 @@ class DemoSeeder extends Seeder
             'name' => 'Bio Polenta grob',
             'slug' => 'bio-polenta-grob',
             'unit' => 'kg',
+            'category' => ProductCategory::Grains,
             'packaging_strategy' => PackagingStrategy::Tiered,
             'estimated_price_cents' => 2600,
             'created_by_user_id' => $marie->id,
@@ -248,6 +255,7 @@ class DemoSeeder extends Seeder
             'name' => 'Bio Haferflocken kernig',
             'slug' => 'bio-haferflocken-kernig',
             'unit' => 'kg',
+            'category' => ProductCategory::Grains,
             'packaging_strategy' => PackagingStrategy::Tiered,
             'estimated_price_cents' => 2200,
             'created_by_user_id' => $marie->id,
@@ -262,6 +270,7 @@ class DemoSeeder extends Seeder
             'name' => 'Kartoffeln (festkochend)',
             'slug' => 'kartoffeln-festkochend',
             'unit' => 'kg',
+            'category' => ProductCategory::Produce,
             'packaging_strategy' => PackagingStrategy::BulkWeighable,
             'estimated_price_cents' => 1800,
             'description' => 'Nur für die Schöneberger Speisekammer, exklusiver Brandenburger Lieferant.',

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Products;
 
 use App\Enums\PackagingStrategy;
+use App\Enums\ProductCategory;
 use App\Enums\Visibility;
 use App\Filament\Resources\Products\Pages\ManageProducts;
 use App\Models\Manufacturer;
@@ -75,6 +76,11 @@ class ProductResource extends Resource
                         ])
                         ->default('kg')
                         ->required(),
+                    Select::make('category')
+                        ->label('Kategorie')
+                        ->options(ProductCategory::class)
+                        ->searchable()
+                        ->helperText('Hilft beim Sortieren und Filtern, z. B. im Warenkorb-Modal.'),
                     Select::make('packaging_strategy')
                         ->label('Verpackungs-Logik')
                         ->options(PackagingStrategy::class)
@@ -168,6 +174,11 @@ class ProductResource extends Resource
                     ->sortable()
                     ->weight('semibold')
                     ->description(fn (Product $r) => $r->manufacturer?->name),
+                TextColumn::make('category')
+                    ->label('Kategorie')
+                    ->badge()
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('unit')
                     ->label('Einh.')
                     ->color('gray'),
@@ -197,6 +208,10 @@ class ProductResource extends Resource
             ])
             ->defaultSort('name')
             ->filters([
+                SelectFilter::make('category')
+                    ->label('Kategorie')
+                    ->options(ProductCategory::class)
+                    ->multiple(),
                 SelectFilter::make('visibility')
                     ->label('Sichtbarkeit')
                     ->options(Visibility::class),
