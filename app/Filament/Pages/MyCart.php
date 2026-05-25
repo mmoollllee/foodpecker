@@ -17,18 +17,21 @@ use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\HtmlString;
 
 class MyCart extends Page implements HasActions, HasSchemas
 {
@@ -100,45 +103,56 @@ class MyCart extends Page implements HasActions, HasSchemas
             ])
             ->schema([
                 Hidden::make('round_id'),
-                Select::make('product_id')
-                    ->label('Produkt')
-                    ->options(fn (Get $get): array => $this->groupedProductOptionsForRound((int) $get('round_id')))
-                    ->searchable()
-                    ->preload()
-                    ->required()
-                    ->live()
-                    ->helperText('Sortiert nach Kategorie. Hersteller steht hinter dem Produktnamen.'),
-                ToggleButtons::make('quantity_mode')
-                    ->label('Mengenangabe')
-                    ->options($modeOptions)
-                    ->default(QuantityMode::Exact->value)
-                    ->required()
-                    ->inline()
-                    ->live(),
-                TextInput::make('exact_quantity')
-                    ->label('Exakte Menge')
-                    ->numeric()
-                    ->step(0.01)
-                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
-                    ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value)
-                    ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value),
-                TextInput::make('min_quantity')
-                    ->label('Mindestmenge (flexibel)')
-                    ->numeric()
-                    ->step(0.01)
-                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
-                    ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
-                    ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
-                TextInput::make('max_quantity')
-                    ->label('Maximale Menge (flexibel)')
-                    ->numeric()
-                    ->step(0.01)
-                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
-                    ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
-                    ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
-                Textarea::make('notes')
-                    ->label('Notiz (optional)')
-                    ->rows(2),
+                Section::make()
+                    ->schema([
+                        Select::make('product_id')
+                            ->label('Produkt')
+                            ->options(fn (Get $get): array => $this->groupedProductOptionsForRound((int) $get('round_id')))
+                            ->searchable()
+                            ->preload()
+                            ->required()
+                            ->live()
+                            ->columnSpanFull(),
+                        Placeholder::make('product_card')
+                            ->hiddenLabel()
+                            ->visible(fn (Get $get): bool => (int) $get('product_id') > 0)
+                            ->content(fn (Get $get) => $this->productCardFor((int) $get('product_id')))
+                            ->columnSpanFull(),
+                        ToggleButtons::make('quantity_mode')
+                            ->label('Mengenangabe')
+                            ->options($modeOptions)
+                            ->default(QuantityMode::Exact->value)
+                            ->required()
+                            ->inline()
+                            ->live(),
+                        TextInput::make('exact_quantity')
+                            ->label('Exakte Menge')
+                            ->numeric()
+                            ->step(0.01)
+                            ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
+                            ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value)
+                            ->columnSpan(2)
+                            ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value),
+                        TextInput::make('min_quantity')
+                            ->label('Mindestmenge (flexibel)')
+                            ->numeric()
+                            ->step(0.01)
+                            ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
+                            ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
+                            ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
+                        TextInput::make('max_quantity')
+                            ->label('Maximale Menge (flexibel)')
+                            ->numeric()
+                            ->step(0.01)
+                            ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
+                            ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
+                            ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
+                        Textarea::make('notes')
+                            ->label('Notiz (optional)')
+                            ->rows(2)
+                            ->columnSpanFull(),
+                    ])
+                    ->columns(3),
             ])
             ->action(function (array $data): void {
                 $roundId = (int) ($data['round_id'] ?? $this->contextRoundId ?? 0);
@@ -221,6 +235,22 @@ class MyCart extends Page implements HasActions, HasSchemas
         return $result;
     }
 
+    private function productCardFor(int $productId): Htmlable
+    {
+        $product = $productId > 0
+            ? Product::with('manufacturer', 'priceTiers')->find($productId)
+            : null;
+
+        return new HtmlString(
+            view('components.foodpecker.product-card', [
+                'product' => $product,
+                'compact' => false,
+                'showDescription' => true,
+                'showPricing' => true,
+            ])->render()
+        );
+    }
+
     private function unitLabelForProduct(int $productId): ?string
     {
         if ($productId === 0) {
@@ -283,11 +313,10 @@ class MyCart extends Page implements HasActions, HasSchemas
                 return $data;
             })
             ->schema([
-                Select::make('product_id')
-                    ->label('Produkt')
-                    ->disabled()
-                    ->dehydrated(false)
-                    ->options(fn (): array => Product::pluck('name', 'id')->all()),
+                Placeholder::make('product_card')
+                    ->hiddenLabel()
+                    ->content(fn (Get $get) => $this->productCardFor((int) $get('product_id'))),
+                Hidden::make('product_id'),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
                     ->options($modeOptions)

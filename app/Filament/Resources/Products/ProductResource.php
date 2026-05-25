@@ -15,6 +15,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -27,8 +28,10 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\HtmlString;
 
 class ProductResource extends Resource
 {
@@ -225,7 +228,24 @@ class ProductResource extends Resource
                     ->preload(),
             ])
             ->recordActions([
-                ViewAction::make()->label('Ansehen')->slideOver(),
+                ViewAction::make()
+                    ->label('Ansehen')
+                    ->modalHeading('Produkt')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Schließen')
+                    ->modalWidth('lg')
+                    ->schema([
+                        Placeholder::make('product_card')
+                            ->hiddenLabel()
+                            ->content(fn (Product $record): Htmlable => new HtmlString(
+                                view('components.foodpecker.product-card', [
+                                    'product' => $record->loadMissing('manufacturer', 'priceTiers'),
+                                    'compact' => false,
+                                    'showDescription' => true,
+                                    'showPricing' => true,
+                                ])->render()
+                            )),
+                    ]),
                 EditAction::make()->label('Bearbeiten')->modalWidth('6xl'),
                 DeleteAction::make()->label('Löschen'),
             ])

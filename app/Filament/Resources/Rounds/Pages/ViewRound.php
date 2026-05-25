@@ -25,6 +25,7 @@ use App\Services\Notifications\DraftBuilder;
 use App\Services\Rounds\PhaseTransitioner;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -35,6 +36,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\ValidationException;
 
 class ViewRound extends Page
@@ -245,6 +247,10 @@ class ViewRound extends Page
                     ->helperText($this->round->availableProducts()->exists()
                         ? 'Produkte aus dem für diese Runde kuratierten Sortiment.'
                         : 'Alle für die Gruppe sichtbaren Produkte.'),
+                Placeholder::make('product_card')
+                    ->hiddenLabel()
+                    ->visible(fn (Get $get): bool => (int) $get('product_id') > 0)
+                    ->content(fn (Get $get) => $this->productCardFor((int) $get('product_id'))),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
                     ->options(QuantityMode::class)
@@ -520,6 +526,22 @@ class ViewRound extends Page
     private function refreshRound(): void
     {
         $this->mount($this->record);
+    }
+
+    private function productCardFor(int $productId): Htmlable
+    {
+        $product = $productId > 0
+            ? Product::with('manufacturer', 'priceTiers')->find($productId)
+            : null;
+
+        return new HtmlString(
+            view('components.foodpecker.product-card', [
+                'product' => $product,
+                'compact' => false,
+                'showDescription' => true,
+                'showPricing' => true,
+            ])->render()
+        );
     }
 
     private function unitLabelForProduct(int $productId): ?string

@@ -288,6 +288,17 @@ it('Mein-Warenkorb-Seite listet aktive Bestellrunden und öffnet Modal ohne Bind
         ->screenshot(filename: '19-my-cart-add-modal', fullPage: true);
 });
 
+it('Produkt-Ansehen-Modal zeigt die Product-Card mit Preisstaffeln', function () {
+    $this->actingAs($this->marie);
+
+    $page = visit('/g/speisekammer-schoeneberg/products')
+        ->press('Ansehen')
+        ->wait(1)
+        ->assertSee('Gebindegrößen & Preise')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '20-product-card-modal', fullPage: true);
+});
+
 it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)', function () {
     $this->actingAs($this->marie);
 

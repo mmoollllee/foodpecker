@@ -13,8 +13,8 @@ enum QuantityMode: string implements HasColor, HasLabel
     public function getLabel(): string
     {
         return match ($this) {
-            self::Exact => 'Exakte Menge',
-            self::Flexible => 'Flexible Spanne',
+            self::Exact => 'Exakt',
+            self::Flexible => 'Flexibel',
         };
     }
 
