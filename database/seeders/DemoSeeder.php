@@ -32,6 +32,7 @@ use App\Services\Distribution\Distributor;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class DemoSeeder extends Seeder
@@ -277,6 +278,22 @@ class DemoSeeder extends Seeder
             'created_by_user_id' => $tobias->id,
         ]);
         PriceTier::create(['product_id' => $kartoffeln->id, 'label' => '25 kg Sack', 'package_amount' => 25, 'price_cents' => 4500, 'is_divisible' => true, 'divisible_step' => 0.5, 'sort_order' => 1]);
+
+        // ---------------- Beschreibungen nachpflegen + SVG-Demo-Bilder anlegen ----------------
+        $descriptions = [
+            $polenta->id => 'Bramata-Polenta, fein gemahlen aus Bio-Mais. Wird beim Kochen wunderbar cremig — perfekt zu geschmortem Gemüse oder mit Käse als Beilage. 12 Monate haltbar.',
+            $hafer->id => 'Großblättrige, kernige Bio-Haferflocken. Ideal für klassisches Müsli, Porridge und zum Backen. Etwas süß, lange sättigend.',
+            $spirelli->id => 'Klassische Spiralen aus 100 % Hartweizen, in 5 kg Kartons mit dichten Innenbeuteln. Kochzeit ca. 8 Minuten, bissfest auch nach 10 Minuten.',
+        ];
+        foreach ($descriptions as $productId => $text) {
+            Product::where('id', $productId)->update(['description' => $text]);
+        }
+
+        foreach ([$dinkelmehl, $reis, $senf, $spaghetti, $spirelli, $polenta, $hafer, $kartoffeln] as $product) {
+            $product->refresh();
+            $path = $this->makeProductImage($product);
+            $product->forceFill(['image_path' => $path])->save();
+        }
 
         // Notiz an Hersteller
         Note::create([
@@ -606,6 +623,56 @@ class DemoSeeder extends Seeder
         $this->command->info('     linus@foodpecker.test   (Teilnehmer in Schöneberg, Owner in Familie)');
         $this->command->info('     aylin@foodpecker.test   (Teilnehmer in Schöneberg)');
         $this->command->info('     jonas@foodpecker.test   (Teilnehmer in Schöneberg)');
+    }
+
+    /**
+     * Erzeugt ein einfaches SVG-Demo-Bild für ein Produkt und legt es unter
+     * storage/app/public/products/{slug}.svg ab. Gibt den relativen image_path zurück.
+     */
+    private function makeProductImage(Product $product): string
+    {
+        $palette = match ($product->category) {
+            ProductCategory::Grains => ['#fbbf24', '#b45309', '🌾'],
+            ProductCategory::Flours => ['#fde68a', '#92400e', '🥖'],
+            ProductCategory::Pasta => ['#fb923c', '#9a3412', '🍝'],
+            ProductCategory::Legumes => ['#a3e635', '#3f6212', '🫘'],
+            ProductCategory::Condiments => ['#fb7185', '#9f1239', '🍯'],
+            ProductCategory::Oils => ['#34d399', '#065f46', '🫒'],
+            ProductCategory::Produce => ['#86efac', '#166534', '🥔'],
+            ProductCategory::Sweeteners => ['#f9a8d4', '#9d174d', '🍬'],
+            ProductCategory::Spices => ['#f87171', '#991b1b', '🌶️'],
+            ProductCategory::Dairy => ['#7dd3fc', '#075985', '🧀'],
+            ProductCategory::Beverages => ['#93c5fd', '#1e40af', '🥤'],
+            default => ['#d4d4d8', '#52525b', '📦'],
+        };
+
+        [$bgFrom, $bgTo, $emoji] = $palette;
+        $initials = htmlspecialchars($product->initials(), ENT_QUOTES, 'UTF-8');
+        $name = htmlspecialchars(Str::limit($product->name, 28), ENT_QUOTES, 'UTF-8');
+
+        $svg = <<<SVG
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="{$bgFrom}"/>
+      <stop offset="100%" stop-color="{$bgTo}"/>
+    </linearGradient>
+    <pattern id="d" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.18)"/>
+    </pattern>
+  </defs>
+  <rect width="600" height="600" fill="url(#g)"/>
+  <rect width="600" height="600" fill="url(#d)"/>
+  <text x="300" y="280" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="240" font-weight="700" fill="rgba(255,255,255,0.92)">{$emoji}</text>
+  <text x="300" y="430" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="48" font-weight="700" letter-spacing="2" fill="rgba(255,255,255,0.95)">{$initials}</text>
+  <text x="300" y="500" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="24" fill="rgba(255,255,255,0.8)">{$name}</text>
+</svg>
+SVG;
+
+        $path = 'products/'.$product->slug.'.svg';
+        Storage::disk('public')->put($path, $svg);
+
+        return $path;
     }
 
     private function makeUser(string $first, string $last, string $email): User

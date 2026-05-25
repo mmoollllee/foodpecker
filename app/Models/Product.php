@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class Product extends Model
@@ -32,6 +33,7 @@ class Product extends Model
         'category',
         'packaging_strategy',
         'description',
+        'image_path',
         'estimated_price_cents',
         'estimated_price_per_unit',
     ];
@@ -108,5 +110,37 @@ class Product extends Model
         }
 
         return $tiers->implode(' · ');
+    }
+
+    /**
+     * Liefert die öffentliche URL zum Produktbild — oder null, wenn keines hinterlegt ist.
+     */
+    public function imageUrl(): ?string
+    {
+        if (! $this->image_path) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->image_path);
+    }
+
+    /**
+     * Initialen für die Fallback-Darstellung in der Product-Card (max. 2 Zeichen).
+     */
+    public function initials(): string
+    {
+        $words = preg_split('/\s+/', trim($this->name ?? ''));
+        $initials = '';
+        foreach ($words as $word) {
+            if ($word === '') {
+                continue;
+            }
+            $initials .= mb_strtoupper(mb_substr($word, 0, 1));
+            if (mb_strlen($initials) >= 2) {
+                break;
+            }
+        }
+
+        return $initials ?: '?';
     }
 }

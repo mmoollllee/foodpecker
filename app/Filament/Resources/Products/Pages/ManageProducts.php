@@ -9,9 +9,11 @@ use App\Filament\Resources\Products\ProductResource;
 use App\Models\Manufacturer;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Pages\ManageRecords;
@@ -155,6 +157,27 @@ class ManageProducts extends ManageRecords
                                 ->addActionLabel('Weitere Gebindegröße hinzufügen')
                                 ->helperText('Reis kannst du z. B. in 10 kg, 25 kg und 50 kg Säcken bestellen — eine Zeile pro Größe.')
                                 ->columnSpanFull(),
+                        ]),
+
+                    Step::make('Beschreibung & Bild')
+                        ->description('Optional, aber hilfreich für die Mitglieder')
+                        ->icon(Heroicon::OutlinedPhoto)
+                        ->schema([
+                            Textarea::make('description')
+                                ->label('Beschreibung')
+                                ->placeholder('Worauf solltet ihr beim Bestellen achten? Geschmack, Anwendung, Besonderheiten…')
+                                ->rows(4)
+                                ->helperText('Wird in der Produkt-Karte angezeigt — gibt Mitgliedern Kontext bevor sie etwas in den Warenkorb legen.'),
+                            FileUpload::make('image_path')
+                                ->label('Produktbild')
+                                ->image()
+                                ->disk('public')
+                                ->directory('products')
+                                ->visibility('public')
+                                ->imageEditor()
+                                ->imageCropAspectRatio('1:1')
+                                ->maxSize(5120)
+                                ->helperText('Quadratisches Bild funktioniert am besten (z. B. ein Foto vom Hersteller).'),
                         ]),
                 ])
                 ->mutateDataUsing(fn (array $data) => ProductResource::mutateFormDataBeforeCreate($data)),

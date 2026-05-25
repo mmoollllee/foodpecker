@@ -15,6 +15,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -156,11 +157,23 @@ class ProductResource extends Resource
                         ->addActionLabel('Weitere Größe hinzufügen'),
                 ]),
 
-            Section::make('Beschreibung')
+            Section::make('Beschreibung & Bild')
                 ->schema([
                     Textarea::make('description')
                         ->label('Beschreibung')
-                        ->rows(4),
+                        ->placeholder('Worauf solltet ihr beim Bestellen achten? Geschmack, Anwendung, Besonderheiten…')
+                        ->rows(4)
+                        ->columnSpanFull(),
+                    FileUpload::make('image_path')
+                        ->label('Produktbild (optional)')
+                        ->image()
+                        ->disk('public')
+                        ->directory('products')
+                        ->visibility('public')
+                        ->imageEditor()
+                        ->imageCropAspectRatio('1:1')
+                        ->maxSize(5120)
+                        ->helperText('Quadrate funktionieren am besten. Wird in der Produkt-Karte rechts neben dem Hersteller angezeigt.'),
                 ])
                 ->collapsed()
                 ->collapsible(),
