@@ -106,6 +106,7 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->searchable()
                     ->preload()
                     ->required()
+                    ->live()
                     ->helperText('Sortiert nach Kategorie. Hersteller steht hinter dem Produktnamen.'),
                 ToggleButtons::make('quantity_mode')
                     ->label('Mengenangabe')
@@ -118,18 +119,21 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->label('Exakte Menge')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value),
                 TextInput::make('min_quantity')
                     ->label('Mindestmenge (flexibel)')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 TextInput::make('max_quantity')
                     ->label('Maximale Menge (flexibel)')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 Textarea::make('notes')
@@ -217,6 +221,25 @@ class MyCart extends Page implements HasActions, HasSchemas
         return $result;
     }
 
+    private function unitLabelForProduct(int $productId): ?string
+    {
+        if ($productId === 0) {
+            return null;
+        }
+        $unit = Product::query()->where('id', $productId)->value('unit');
+
+        return match ($unit) {
+            'kg' => 'kg',
+            'g' => 'g',
+            'l' => 'l',
+            'ml' => 'ml',
+            'stk' => 'Stück',
+            'glas' => 'Glas',
+            'pkg' => 'Packung',
+            default => $unit,
+        };
+    }
+
     private function roundFromArguments(array $arguments): ?Round
     {
         $id = (int) ($arguments['round_id'] ?? $this->contextRoundId ?? 0);
@@ -275,16 +298,19 @@ class MyCart extends Page implements HasActions, HasSchemas
                     ->label('Exakte Menge')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value),
                 TextInput::make('min_quantity')
                     ->label('Mindestmenge (flexibel)')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 TextInput::make('max_quantity')
                     ->label('Maximale Menge (flexibel)')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 Textarea::make('notes')->label('Notiz')->rows(2),
             ])

@@ -241,6 +241,7 @@ class ViewRound extends Page
                     ->searchable()
                     ->preload()
                     ->required()
+                    ->live()
                     ->helperText($this->round->availableProducts()->exists()
                         ? 'Produkte aus dem für diese Runde kuratierten Sortiment.'
                         : 'Alle für die Gruppe sichtbaren Produkte.'),
@@ -255,18 +256,21 @@ class ViewRound extends Page
                     ->label('Exakte Menge')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Exact->value),
                 TextInput::make('min_quantity')
                     ->label('Mindestmenge')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 TextInput::make('max_quantity')
                     ->label('Maximale Menge')
                     ->numeric()
                     ->step(0.01)
+                    ->suffix(fn (Get $get) => $this->unitLabelForProduct((int) $get('product_id')))
                     ->visible(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value)
                     ->required(fn (Get $get) => $get('quantity_mode') === QuantityMode::Flexible->value),
                 Textarea::make('notes')->label('Notiz')->rows(2),
@@ -516,6 +520,25 @@ class ViewRound extends Page
     private function refreshRound(): void
     {
         $this->mount($this->record);
+    }
+
+    private function unitLabelForProduct(int $productId): ?string
+    {
+        if ($productId === 0) {
+            return null;
+        }
+        $unit = Product::query()->where('id', $productId)->value('unit');
+
+        return match ($unit) {
+            'kg' => 'kg',
+            'g' => 'g',
+            'l' => 'l',
+            'ml' => 'ml',
+            'stk' => 'Stück',
+            'glas' => 'Glas',
+            'pkg' => 'Packung',
+            default => $unit,
+        };
     }
 
     /**
