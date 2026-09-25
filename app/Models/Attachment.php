@@ -31,9 +31,25 @@ class Attachment extends Model
         return $this->belongsTo(User::class, 'uploaded_by_user_id');
     }
 
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(Group::class);
+    }
+
+    /**
+     * Download link — the file itself is private and handed out by the
+     * AttachmentController after an authorization check.
+     */
     public function url(): string
     {
-        return Storage::disk($this->disk)->url($this->path);
+        return route('attachments.download', $this);
+    }
+
+    protected static function booted(): void
+    {
+        static::deleted(function (self $attachment): void {
+            Storage::disk($attachment->disk)->delete($attachment->path);
+        });
     }
 
     public function humanSize(): string

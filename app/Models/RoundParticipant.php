@@ -12,6 +12,8 @@ class RoundParticipant extends Model
         'user_id',
         'removed',
         'remove_reason',
+        'removed_at',
+        'removed_by_user_id',
         'round_up_to_cents',
     ];
 
@@ -19,6 +21,8 @@ class RoundParticipant extends Model
     {
         return [
             'removed' => 'boolean',
+            'removed_at' => 'datetime',
+            'round_up_to_cents' => 'integer',
         ];
     }
 
@@ -30,5 +34,10 @@ class RoundParticipant extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function removedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'removed_by_user_id');
     }
 }

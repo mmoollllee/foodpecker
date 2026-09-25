@@ -29,7 +29,28 @@ class PriceTier extends Model
             'package_amount' => 'decimal:3',
             'divisible_step' => 'decimal:3',
             'is_divisible' => 'boolean',
+            'price_cents' => 'integer',
+            'min_order_packages' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::created(fn (self $tier) => $tier->logChange('added'));
+        static::updated(fn (self $tier) => $tier->logChange('changed'));
+        static::deleted(fn (self $tier) => $tier->logChange('removed'));
+    }
+
+    /**
+     * Price changes show up in the product's activity stream.
+     */
+    private function logChange(string $change): void
+    {
+        $this->product()->withTrashed()->first()?->logActivity('tier_changed', [
+            'label' => $this->label,
+            'change' => $change,
+            'price_cents' => $this->price_cents,
+        ]);
     }
 
     public function product(): BelongsTo
@@ -48,7 +69,7 @@ class PriceTier extends Model
 
     public function formattedPricePerUnit(): string
     {
-        return number_format($this->pricePerUnit(), 2, ',', '.').' € / '.$this->product?->unit;
+        return number_format($this->pricePerUnit(), 2, ',', '.').' € / '.$this->product?->unitLabel();
     }
 
     public function formattedPrice(): string

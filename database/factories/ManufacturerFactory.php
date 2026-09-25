@@ -26,7 +26,7 @@ class ManufacturerFactory extends Factory
             'visibility' => Visibility::Private,
             'website' => 'https://'.fake()->domainName(),
             'contact_email' => fake()->safeEmail(),
-            'contact_phone' => fake()->phoneNumber(),
+            'contact_phone' => fake()->numerify('+49 30 #######'),
             'address' => fake()->address(),
             'shipping_notes' => fake()->optional()->sentence(),
             'description' => fake()->optional()->paragraph(),

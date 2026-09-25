@@ -2,48 +2,84 @@
 
 namespace App\Services\Rounds;
 
-use App\Enums\ProposalStatus;
 use App\Enums\RoundPhase;
+use App\Models\Payment;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Proposals\ProposalWorkflow;
 use Illuminate\Validation\ValidationException;
 
 class PhaseTransitioner
 {
+    public function __construct(
+        private ConsensusChecker $consensus,
+        private ProposalWorkflow $workflow,
+        private PriceObservationRecorder $priceObservations,
+    ) {}
+
+    /**
+     * The regular next step of the round, if there is one.
+     */
+    public function nextPhase(Round $round): ?RoundPhase
+    {
+        return collect($round->phase->allowedTransitions())
+            ->first(fn (RoundPhase $phase): bool => $phase !== RoundPhase::Cancelled
+                && $phase->order() > $round->phase->order());
+    }
+
+    /**
+     * The step back that is allowed for corrections, if there is one.
+     */
+    public function previousPhase(Round $round): ?RoundPhase
+    {
+        return collect($round->phase->allowedTransitions())
+            ->first(fn (RoundPhase $phase): bool => $phase !== RoundPhase::Cancelled
+                && $phase->order() < $round->phase->order());
+    }
+
+    /**
+     * What is still missing before the round may enter the given phase.
+     *
+     * @return array<int, string>
+     */
+    public function missingRequirements(Round $round, RoundPhase $to): array
+    {
+        return match ($to) {
+            RoundPhase::Shopping => $round->phase === RoundPhase::Draft ? $this->missingForShopping($round) : [],
+            RoundPhase::Negotiating => $round->phase === RoundPhase::Shopping ? $this->missingForNegotiating($round) : [],
+            RoundPhase::Finalizing => $round->phase === RoundPhase::Negotiating ? $this->missingForFinalizing($round) : [],
+            RoundPhase::Payment => $this->missingForPayment($round),
+            RoundPhase::Ordering => $this->missingForOrdering($round),
+            default => [],
+        };
+    }
+
     /**
      * Prüft, ob ein Übergang erlaubt ist — ohne Daten zu ändern.
      *
      * Wirft eine Exception mit lesbarer Fehlermeldung, wenn nicht.
      */
-    public function assertCanTransition(Round $round, RoundPhase $to, ?User $user = null): void
+    public function assertCanTransition(Round $round, RoundPhase $to, ?User $user = null, ?string $reason = null): void
     {
         if (! $round->phase->canTransitionTo($to)) {
-            throw ValidationException::withMessages([
-                'phase' => sprintf(
-                    'Übergang von "%s" nach "%s" ist nicht erlaubt.',
-                    $round->phase->getLabel(),
-                    $to->getLabel(),
-                ),
-            ]);
+            $this->fail(sprintf(
+                'Übergang von "%s" nach "%s" ist nicht erlaubt.',
+                $round->phase->getLabel(),
+                $to->getLabel(),
+            ));
         }
 
-        if ($user) {
-            $isLead = $round->lead_user_id === $user->id;
-            $isOwner = $round->group?->owner_id === $user->id;
-            if (! $isLead && ! $isOwner) {
-                throw ValidationException::withMessages([
-                    'phase' => 'Nur der Lead oder Gruppen-Owner darf die Phase wechseln.',
-                ]);
-            }
+        if ($user && ! $round->isManagedBy($user)) {
+            $this->fail('Nur der Lead oder Gruppen-Owner darf die Phase wechseln.');
         }
 
-        match ($to) {
-            RoundPhase::Shopping => $this->guardEnterShopping($round),
-            RoundPhase::Negotiating => $this->guardEnterNegotiating($round),
-            RoundPhase::Finalizing => $this->guardEnterFinalizing($round),
-            RoundPhase::Payment => $this->guardEnterPayment($round),
-            default => null,
-        };
+        if ($to === RoundPhase::Cancelled && blank($reason)) {
+            $this->fail('Bitte gib einen Grund für den Abbruch an.');
+        }
+
+        if ($missing = $this->missingRequirements($round, $to)) {
+            $this->fail($missing[0]);
+        }
     }
 
     /**
@@ -51,9 +87,14 @@ class PhaseTransitioner
      */
     public function transition(Round $round, RoundPhase $to, ?User $user = null, ?string $reason = null): Round
     {
-        $this->assertCanTransition($round, $to, $user);
+        $this->assertCanTransition($round, $to, $user, $reason);
 
         $from = $round->phase;
+
+        if ($from === RoundPhase::Finalizing && $to === RoundPhase::Negotiating) {
+            $this->workflow->unchoose($round);
+        }
+
         $round->forceFill([
             'phase' => $to->value,
             'phase_changed_at' => now(),
@@ -65,52 +106,99 @@ class PhaseTransitioner
             'reason' => $reason,
         ]);
 
+        if ($to === RoundPhase::Ordering) {
+            $this->priceObservations->record($round);
+        }
+
         return $round;
     }
 
-    private function guardEnterShopping(Round $round): void
+    /**
+     * @return array<int, string>
+     */
+    private function missingForShopping(Round $round): array
     {
-        if ($round->pickupDates()->count() === 0) {
-            throw ValidationException::withMessages([
-                'phase' => 'Mindestens ein Abholtermin muss angelegt sein.',
-            ]);
+        $missing = [];
+        $running = $round->group?->runningRound();
+
+        if ($running !== null && ! $running->is($round)) {
+            $missing[] = "Es läuft noch die Bestellrunde „{$running->title}“. Eine Gruppe hat immer nur eine laufende Runde — starte diese, sobald die laufende abgeschlossen oder abgebrochen ist.";
         }
+
+        if (! $round->pickupDates()->exists()) {
+            $missing[] = 'Mindestens ein Abholtermin muss angelegt sein.';
+        }
+
         if (blank($round->pickup_location)) {
-            throw ValidationException::withMessages([
-                'phase' => 'Abholort muss gesetzt sein.',
-            ]);
+            $missing[] = 'Abholort muss gesetzt sein.';
         }
+
+        return $missing;
     }
 
-    private function guardEnterNegotiating(Round $round): void
+    /**
+     * @return array<int, string>
+     */
+    private function missingForNegotiating(Round $round): array
     {
-        $hasItems = $round->cartItems()->exists();
-        if (! $hasItems) {
-            throw ValidationException::withMessages([
-                'phase' => 'Es liegt noch kein gefüllter Warenkorb vor.',
-            ]);
-        }
+        return $round->activeCartItems()->exists()
+            ? []
+            : ['Es liegt noch kein gefüllter Warenkorb vor.'];
     }
 
-    private function guardEnterFinalizing(Round $round): void
+    /**
+     * @return array<int, string>
+     */
+    private function missingForFinalizing(Round $round): array
     {
-        $hasPublished = $round->proposals()
-            ->where('status', ProposalStatus::Published->value)
-            ->orWhere('status', ProposalStatus::Chosen->value)
-            ->exists();
-        if (! $hasPublished) {
-            throw ValidationException::withMessages([
-                'phase' => 'Mindestens ein Vorschlag muss zur Abstimmung freigegeben sein.',
-            ]);
-        }
+        return $round->proposals()->openForVoting()->exists()
+            ? []
+            : ['Mindestens ein Vorschlag muss zur Abstimmung freigegeben sein.'];
     }
 
-    private function guardEnterPayment(Round $round): void
+    /**
+     * @return array<int, string>
+     */
+    private function missingForPayment(Round $round): array
     {
-        if ($round->chosen_proposal_id === null) {
-            throw ValidationException::withMessages([
-                'phase' => 'Bitte zuerst einen Vorschlag als endgültig markieren.',
-            ]);
+        $proposal = $round->chosenProposal;
+
+        if ($proposal === null) {
+            return ['Bitte zuerst einen einstimmig bestätigten Vorschlag als finale Bestellung wählen.'];
         }
+
+        $consensus = $this->consensus->evaluate($proposal);
+
+        return $consensus->isUnanimous()
+            ? []
+            : [$this->workflow->explainMissingConsensus($consensus)];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function missingForOrdering(Round $round): array
+    {
+        $payments = $round->payments()->with('user')->get();
+
+        if ($payments->isEmpty()) {
+            return ['Es gibt noch keine Zahlungen — ist eine finale Bestellung gewählt?'];
+        }
+
+        $open = $payments->reject(fn (Payment $payment): bool => $payment->isSettled());
+
+        if ($open->isEmpty()) {
+            return [];
+        }
+
+        return [sprintf(
+            'Noch offene Zahlungen: %s.',
+            $open->map(fn (Payment $payment): string => $payment->user?->fullName() ?? '—')->sort()->implode(', '),
+        )];
+    }
+
+    private function fail(string $message): never
+    {
+        throw ValidationException::withMessages(['phase' => $message]);
     }
 }

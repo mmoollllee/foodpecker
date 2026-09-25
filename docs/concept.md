@@ -6,7 +6,7 @@ Diese Open-Source-Plattform ermöglicht es Gruppen, gemeinsam Lebensmittel und G
 
 Die Plattform basiert auf vier Grundwerten:
 
-- **Zusammenarbeit**: Jeder kann eine Runde starten, jeder kann Vorschläge machen, Entscheidungen werden transparent mit allen Beteiligten getroffen.
+- **Zusammenarbeit**: Moderatoren starten Runden, jeder kann mitbestellen und Vorschläge machen, Entscheidungen werden transparent mit allen Beteiligten getroffen.
 - **Fairness**: Niemand wird zu Mengen gezwungen, denen er nicht zustimmt. Verpackungsbeschränkungen werden gemeinsam und gerecht gelöst.
 - **Flexibilität**: Zeitpläne können verschoben werden, Rollen können (mit Zustimmung) übergeben werden, das System passt sich an, wie reale Gruppen tatsächlich funktionieren.
 - **Vertrauen**: Wer bei einer Gruppe mitmacht, ist ein Freund. Konflikte und Probleme werden außerhalb der Plattform persönlich geklärt und abgewickelt. Die Plattform unterstützt diesen Prozess durch Transparenz und Historie, aber sie ersetzt nicht das persönliche Gespräch.
@@ -24,11 +24,15 @@ Technologie-Stack:
 
 Es gibt drei Rollen pro Tenant:
 
-- **Owner**: Ersteller der Gruppe. Kann die Gruppe löschen. Hat alle Berechtigungen.
+- **Owner**: Ersteller der Gruppe. Kann die Owner-Rolle an ein anderes Mitglied übergeben (sobald es zustimmt) oder die Gruppe löschen. Hat alle Berechtigungen.
 - **Moderator**: Kann Produkte und Hersteller erstellen und bearbeiten, Runden einleiten, neue Teilnehmer einladen und deren Rollen zuweisen.
 - **Participant**: Kann einkaufen und Warenkörbe füllen. Sieht alle anderen Warenkörbe. Hat keine Verwaltungsrechte.
 
 Alle Mitglieder können sehen, was andere in ihren Warenkörben haben — volle Transparenz innerhalb der Gruppe.
+
+### Profil
+
+Bei der Registrierung gibt jede Person ihre **Handynummer**, ihren **Wohnort mit PLZ** und die **Anzahl Personen in ihrem Haushalt** an, für die sie mit einkauft. Im eigenen Profil lassen sich diese Angaben ändern, ein **Profilfoto** hochladen und optional ein **Spitzname** angeben — wie man genannt werden möchte. Die Mitglieder einer Gruppe sehen gegenseitig Foto und Kontaktdaten — praktisch für Absprachen und die Abholung. Moderatoren und Owner können mehrere Personen auf einmal einladen, indem sie die E-Mail-Adressen durch Komma getrennt eingeben.
 
 ## Hersteller und Produkte
 
@@ -64,6 +68,8 @@ Produkte und Hersteller haben jeweils einen **Aktivitäten-Stream**, der dokumen
 
 Diese Notizen und Dokumente sind besonders bei öffentlichen Herstellern wertvoll, da andere Gruppen von den Erfahrungen profitieren können.
 
+Auch die Gruppe selbst führt einen **Verlauf**: wer beigetreten, ausgetreten oder entfernt wurde, wer welche Rolle bekommen hat und wer die Gruppe übernommen hat. So lässt sich nachvollziehen, wer was geändert hat.
+
 ### Verpackungs-Szenarien
 
 Das System muss verschiedene Verpackungslogiken unterstützen:
@@ -89,7 +95,7 @@ Eine Runde ist ein kompletter Bestellzyklus mit klar definierten Phasen.
 
 ### Runde öffnen
 
-Jeder Moderator kann eine neue Runde starten. Dabei werden folgende Parameter und Phasen mit voraussichtlichen Deadlines definiert:
+Jeder Moderator kann eine neue Runde starten. Pro Gruppe läuft immer nur eine Runde: Die nächste lässt sich schon als Entwurf vorbereiten und starten, sobald die laufende abgeschlossen oder abgebrochen ist. Dabei werden folgende Parameter und Phasen mit voraussichtlichen Deadlines definiert:
 
 - **Einkaufsphase**: ca. 2 Wochen
 - **Verhandlungsphase**: Lead holt aktuelle Preise und Konditionen von Herstellern, basierend auf den potentiellen Mengen. ca. 5 Werktage
@@ -170,6 +176,22 @@ Mehrere Bestellversionen können parallel existieren. Jeder Teilnehmer kann mehr
 
 **Entscheidung des Leads:**
 Der Lead sieht alle Versionen mit den jeweiligen Zustimmungen und wählt eine aus. Es können nur Versionen platziert werden, denen alle vorgesehenen Teilnehmer einstimmig zugestimmt haben. Der Lead kann nicht über die Entscheidung eines Teilnehmers hinweggehen, aber einzelne Teilnehmer aus der Bestellung ausschließen.
+
+**Konsens-Regel (verbindlich, so setzt die Plattform sie durch):**
+1. Über eine Position entscheiden die **Betroffenen** — alle, die von dieser Position etwas bekommen. Andere Teilnehmer dürfen ihre Meinung abgeben, können aber keine Position blockieren, von der sie nichts bekommen.
+2. Eine Position ist angenommen, wenn **alle Betroffenen Daumen hoch** gegeben haben. Ein Daumen runter braucht immer eine Begründung.
+3. Ein Vorschlag ist **einstimmig**, wenn jede seiner Positionen angenommen ist und keine ausgeschlossene Person mehr darin vorkommt.
+4. Nur ein einstimmiger Vorschlag kann als finale Bestellung gewählt werden — vom Lead (ersatzweise vom Gruppen-Owner) in der Bestätigungsphase. Ohne gewählten einstimmigen Vorschlag gibt es keine Zahlungsphase.
+5. Ein zur Abstimmung freigegebener Vorschlag ändert sich nicht mehr. Änderungen bedeuten eine neue Version, über die neu abgestimmt wird.
+
+**Ausschluss einzelner Teilnehmer (letzter Ausweg):**
+Führen mehrere Vorschläge nicht zum Ergebnis, weil einzelne Personen nicht zustimmen oder sich nicht melden, darf der Lead sie aus der Bestellung ausschließen — damit niemand eine Bestellung dauerhaft blockieren kann:
+1. Das geht nur beim Vorbereiten eines neuen Vorschlags, also in der Verhandlungs- und Bestätigungsphase, bevor bezahlt wird: Der Lead erstellt eine **neue Version** und schließt im Entwurf, **vor der Freigabe zur Abstimmung**, eine Person aus. Zur Wahl steht nur, wer einem freigegebenen Vorschlag nicht zugestimmt oder nicht abgestimmt hat. Der Lead selbst kann nicht ausgeschlossen werden.
+2. Ein **Grund ist Pflicht** und für alle in der Runde sichtbar, ebenso wer wann ausgeschlossen hat.
+3. Die Person **bleibt Mitglied der Gruppe** und kann an späteren Runden teilnehmen. Ihr Warenkorb bleibt sichtbar, zählt aber nicht mehr, und sie kann nicht mehr abstimmen.
+4. Der Entwurf wird mit denselben Gebinden und verhandelten Preisen **ohne die Person neu berechnet**. Freigegebene Vorschläge, in denen sie noch etwas bekommt, werden **zurückgezogen** — auch eine bereits gewählte finale Bestellung; die zugehörigen offenen Zahlungen entfallen.
+5. Weil sich Mengen und Versandanteile für alle ändern, **stimmen alle verbleibenden Betroffenen über die neue Version ab**.
+6. Solange noch nicht bezahlt wird, kann der Lead den Ausschluss rückgängig machen; Entwürfe werden dann wieder mit der Person berechnet. Zurückgezogene Vorschläge bleiben zurückgezogen.
 
 ### 4. Zahlungsphase
 Teilnehmer zahlen den Lead außerhalb der Plattform (Banküberweisung, bar, etc.). Der Lead markiert im System, wer bezahlt hat und wer nicht.

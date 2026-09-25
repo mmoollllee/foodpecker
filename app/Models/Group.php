@@ -21,10 +21,19 @@ class Group extends Model
         'name',
         'slug',
         'owner_id',
+        'pending_owner_id',
+        'owner_transfer_requested_at',
         'description',
         'contact_email',
         'locale',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'owner_transfer_requested_at' => 'datetime',
+        ];
+    }
 
     protected static function booted(): void
     {
@@ -33,6 +42,45 @@ class Group extends Model
                 $group->slug = static::generateUniqueSlug($group->name);
             }
         });
+
+        static::created(function (self $group): void {
+            $group->ensureOwnerMembership();
+            $group->logActivity('created', ['title' => $group->name], $group->owner);
+        });
+
+        static::updated(function (self $group): void {
+            $fields = array_values(array_intersect(array_keys($group->getChanges()), ['name', 'slug', 'description', 'contact_email']));
+
+            if ($fields !== []) {
+                $group->logActivity('updated', ['fields' => $fields]);
+            }
+        });
+    }
+
+    /**
+     * Everything logged on a group belongs to its own history.
+     */
+    protected function activityGroupId(): ?int
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * The owner is always a member with the owner role, so membership
+     * queries never need to special-case `owner_id`.
+     */
+    public function ensureOwnerMembership(): void
+    {
+        if ($this->owner_id === null) {
+            return;
+        }
+
+        $this->members()->syncWithoutDetaching([
+            $this->owner_id => [
+                'role' => GroupRole::Owner->value,
+                'joined_at' => now(),
+            ],
+        ]);
     }
 
     public static function generateUniqueSlug(string $name): string
@@ -51,6 +99,15 @@ class Group extends Model
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_id');
+    }
+
+    /**
+     * The member asked to take the group over — until they agree, the
+     * current owner stays in charge.
+     */
+    public function pendingOwner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pending_owner_id');
     }
 
     public function members(): BelongsToMany
@@ -87,6 +144,14 @@ class Group extends Model
         return $this->hasMany(Round::class);
     }
 
+    /**
+     * The round the group is running right now — there is at most one.
+     */
+    public function runningRound(): ?Round
+    {
+        return $this->rounds()->running()->latest('phase_changed_at')->first();
+    }
+
     public function groupActivities(): HasMany
     {
         return $this->hasMany(Activity::class);
@@ -113,5 +178,27 @@ class Group extends Model
         $role = $this->roleOf($user);
 
         return $role?->can($permission) ?? false;
+    }
+
+    public function hasMember(User $user): bool
+    {
+        return $this->members()->whereKey($user->getKey())->exists();
+    }
+
+    /**
+     * Select options for picking a member, e.g. as round lead.
+     *
+     * @param  array<int, int>  $exceptUserIds
+     * @return array<int, string>
+     */
+    public function memberOptions(array $exceptUserIds = []): array
+    {
+        return $this->members()
+            ->whereKeyNot($exceptUserIds)
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get()
+            ->mapWithKeys(fn (User $user): array => [$user->id => $user->fullName().' · '.$user->email])
+            ->all();
     }
 }

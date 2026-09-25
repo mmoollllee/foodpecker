@@ -24,11 +24,11 @@
     $strategy = $product->packaging_strategy;
     $visibility = $product->visibility;
 
-    $unitLabel = match ($product->unit) {
-        'kg' => 'kg', 'g' => 'g', 'l' => 'l', 'ml' => 'ml',
-        'stk' => 'Stück', 'glas' => 'Glas', 'pkg' => 'Packung',
-        default => $product->unit,
-    };
+    $unitLabel = $product->unitLabel();
+    $currentGroup = \Filament\Facades\Filament::getTenant();
+    $observations = $showPricing && ! $compact
+        ? $product->recentPriceObservations($currentGroup instanceof \App\Models\Group ? $currentGroup : null)
+        : collect();
 
     $imageUrl = $product->imageUrl();
 
@@ -161,6 +161,30 @@
                                 <div class="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ $tier->formattedPrice() }}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 tabular-nums">{{ $tier->formattedPricePerUnit() }}</div>
                             </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
+        {{-- Tatsächlich gezahlte Preise aus abgeschlossenen Bestellungen --}}
+        @if ($observations->isNotEmpty())
+            <div class="px-4 py-3 border-t border-gray-100 dark:border-white/5">
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                    Zuletzt tatsächlich bezahlt
+                </div>
+                <div class="space-y-1">
+                    @foreach ($observations as $observation)
+                        <div class="flex items-center justify-between gap-3 text-xs">
+                            <span class="text-gray-600 dark:text-gray-300">
+                                {{ $observation->observed_on->format('m/Y') }}
+                                · {{ rtrim(rtrim(number_format((float) $observation->package_amount, 3, ',', '.'), '0'), ',') }} {{ $unitLabel }}
+                                · {{ $observation->group_id === $currentGroup?->getKey() ? 'eure Gruppe' : 'andere Gruppe' }}
+                            </span>
+                            <span class="tabular-nums font-medium text-gray-900 dark:text-gray-100">
+                                {{ \App\Services\Money\Money::format($observation->observed_price_cents) }}
+                                <span class="font-normal text-gray-500">({{ number_format($observation->pricePerUnitCents() / 100, 2, ',', '.') }} € / {{ $unitLabel }})</span>
+                            </span>
                         </div>
                     @endforeach
                 </div>

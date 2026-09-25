@@ -15,6 +15,7 @@ class DistributionResult
         public readonly array $allocations,
         public readonly bool $feasible,
         public readonly array $notes = [],
+        public readonly float $unallocatedQuantity = 0.0,
     ) {}
 
     public function sumAllocated(): float

@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages\Tenancy;
 
-use App\Enums\GroupRole;
 use App\Models\Group;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -54,12 +53,8 @@ class RegisterGroup extends RegisterTenant
         $data['slug'] = $data['slug'] ?? Str::slug($data['name']);
         $data['owner_id'] = auth()->id();
 
+        // Group::ensureOwnerMembership() makes the founder a member with the owner role.
         $group = Group::create($data);
-
-        $group->members()->attach(auth()->id(), [
-            'role' => GroupRole::Owner->value,
-            'joined_at' => now(),
-        ]);
 
         auth()->user()->forceFill(['current_group_id' => $group->id])->save();
 

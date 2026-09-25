@@ -7,6 +7,7 @@ use App\Filament\Resources\Rounds\RoundResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
 class ListRounds extends ListRecords
@@ -27,21 +28,31 @@ class ListRounds extends ListRecords
         ];
     }
 
+    /**
+     * A group runs one round at a time, so there is little to filter: the
+     * running round with the own drafts, and everything that is over.
+     */
     public function getTabs(): array
     {
         return [
-            'aktiv' => Tab::make('Aktiv')
-                ->modifyQueryUsing(fn (Builder $query) => $query->whereNotIn('phase', [
+            'aktuell' => Tab::make('Aktuell')
+                ->modifyQueryUsing(fn (Builder $query) => $query->active()),
+            'historie' => Tab::make('Historie')
+                ->modifyQueryUsing(fn (Builder $query) => $query->whereIn('phase', [
                     RoundPhase::Completed->value,
                     RoundPhase::Cancelled->value,
                 ])),
-            'shopping' => Tab::make('Im Einkauf')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('phase', RoundPhase::Shopping->value)),
-            'finalizing' => Tab::make('Zur Abstimmung')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('phase', RoundPhase::Finalizing->value)),
-            'completed' => Tab::make('Historie')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('phase', RoundPhase::Completed->value)),
-            'all' => Tab::make('Alle'),
         ];
+    }
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->emptyStateHeading(fn (): string => $this->activeTab === 'historie'
+                ? 'Noch keine abgeschlossene Runde'
+                : 'Gerade läuft keine Bestellrunde')
+            ->emptyStateDescription(fn (): string => $this->activeTab === 'historie'
+                ? 'Abgeschlossene und abgebrochene Runden landen hier.'
+                : 'Starte die nächste Runde — sie bleibt ein privater Entwurf, bis du sie startest.');
     }
 }

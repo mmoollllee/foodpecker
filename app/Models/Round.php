@@ -22,6 +22,8 @@ class Round extends Model
     protected $fillable = [
         'group_id',
         'lead_user_id',
+        'pending_lead_user_id',
+        'lead_handover_requested_at',
         'title',
         'phase',
         'description',
@@ -48,6 +50,8 @@ class Round extends Model
             'payment_deadline' => 'date',
             'expected_delivery' => 'date',
             'phase_changed_at' => 'datetime',
+            'lead_handover_requested_at' => 'datetime',
+            'max_participants' => 'integer',
             'lead_fee_percent' => 'decimal:2',
             'platform_fee_percent' => 'decimal:2',
         ];
@@ -61,6 +65,14 @@ class Round extends Model
     public function lead(): BelongsTo
     {
         return $this->belongsTo(User::class, 'lead_user_id');
+    }
+
+    /**
+     * Member asked to take over as lead, until they accept or decline.
+     */
+    public function pendingLead(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pending_lead_user_id');
     }
 
     public function chosenProposal(): BelongsTo
@@ -78,25 +90,22 @@ class Round extends Model
         return $this->participants()->where('removed', false);
     }
 
-    public function participantUsers(): BelongsToMany
-    {
-        return $this->belongsToMany(User::class, 'round_participants')
-            ->withPivot(['removed', 'remove_reason', 'round_up_to_cents'])
-            ->withTimestamps();
-    }
-
     /**
-     * Vom Lead vorab kuratierte Produktauswahl für diese Runde.
-     * Leere Relation = alle für die Gruppe sichtbaren Produkte sind verfügbar.
+     * Product selection curated by the lead for this round. An empty
+     * selection means every product visible to the group is available.
      */
     public function availableProducts(): BelongsToMany
     {
         return $this->belongsToMany(Product::class, 'round_product')->withTimestamps();
     }
 
+    /**
+     * A curated round stays curated even when all of its products have been
+     * archived in the meantime — then nothing is orderable, not everything.
+     */
     public function availableProductsForCart(): Builder
     {
-        if ($this->availableProducts()->exists()) {
+        if ($this->availableProducts()->withTrashed()->exists()) {
             return $this->availableProducts()->getQuery();
         }
 
@@ -111,6 +120,20 @@ class Round extends Model
     public function cartItems(): HasMany
     {
         return $this->hasMany(CartItem::class);
+    }
+
+    /**
+     * Cart items of participants who have not been excluded from the round.
+     */
+    public function activeCartItems(): HasMany
+    {
+        return $this->cartItems()->whereNotIn(
+            'user_id',
+            RoundParticipant::query()
+                ->select('user_id')
+                ->whereColumn('round_participants.round_id', 'cart_items.round_id')
+                ->where('removed', true),
+        );
     }
 
     public function proposals(): HasMany
@@ -133,18 +156,79 @@ class Round extends Model
         return $this->hasMany(NotificationDraft::class)->latest();
     }
 
-    public function isActive(): bool
+    /**
+     * Rounds that are neither completed nor cancelled.
+     */
+    public function scopeActive(Builder $query): Builder
     {
-        return $this->phase->isActive();
+        return $query->whereNotIn('phase', [RoundPhase::Completed->value, RoundPhase::Cancelled->value]);
     }
 
-    public function phaseProgressPercent(): int
+    /**
+     * Started rounds that are neither completed nor cancelled. A group runs
+     * at most one of them at a time; drafts may be prepared in the meantime.
+     */
+    public function scopeRunning(Builder $query): Builder
     {
-        return (int) round(($this->phase->order() / 8) * 100);
+        return $query->whereNotIn('phase', [
+            RoundPhase::Draft->value,
+            RoundPhase::Completed->value,
+            RoundPhase::Cancelled->value,
+        ]);
     }
 
-    public function cartItemsForUser(User $user)
+    /**
+     * Drafts are private to their lead; every other phase is visible to the group.
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        return $this->cartItems()->where('user_id', $user->id);
+        return $query->where(function (Builder $query) use ($user): void {
+            $query->where('phase', '!=', RoundPhase::Draft->value)
+                ->orWhere('lead_user_id', $user->getKey());
+        });
+    }
+
+    public function isLead(User $user): bool
+    {
+        return $this->lead_user_id === $user->getKey();
+    }
+
+    /**
+     * The lead manages the round; the group owner may step in as fallback.
+     */
+    public function isManagedBy(User $user): bool
+    {
+        return $this->isLead($user) || $this->group?->owner_id === $user->getKey();
+    }
+
+    public function participantFor(User $user): ?RoundParticipant
+    {
+        if ($this->relationLoaded('participants')) {
+            return $this->participants->firstWhere('user_id', $user->getKey());
+        }
+
+        return $this->participants()->where('user_id', $user->getKey())->first();
+    }
+
+    public function isExcluded(User $user): bool
+    {
+        return (bool) $this->participantFor($user)?->removed;
+    }
+
+    /**
+     * Number of participants who have not been excluded.
+     */
+    public function activeParticipantCount(): int
+    {
+        if ($this->relationLoaded('participants')) {
+            return $this->participants->where('removed', false)->count();
+        }
+
+        return $this->activeParticipants()->count();
+    }
+
+    public function hasReachedParticipantLimit(): bool
+    {
+        return $this->max_participants !== null && $this->activeParticipantCount() >= $this->max_participants;
     }
 }

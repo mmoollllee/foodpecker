@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Enums\GroupRole;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasAvatar;
+use Filament\Models\Contracts\HasName;
 use Filament\Models\Contracts\HasTenants;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,18 +17,25 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
+use Mmoollllee\FilamentUserProfile\Concerns\InteractsWithProfilePhoto;
+use Mmoollllee\FilamentUserProfile\Contracts\HasProfilePhoto;
 
-class User extends Authenticatable implements FilamentUser, HasTenants
+class User extends Authenticatable implements FilamentUser, HasAvatar, HasName, HasProfilePhoto, HasTenants
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, InteractsWithProfilePhoto, Notifiable;
 
     protected $fillable = [
         'first_name',
         'last_name',
+        'nickname',
         'name',
         'email',
         'phone',
+        'postal_code',
+        'city',
+        'household_size',
+        'profile_photo_path',
         'password',
         'current_group_id',
     ];
@@ -38,6 +47,7 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'household_size' => 'integer',
         ];
     }
 
@@ -48,20 +58,12 @@ class User extends Authenticatable implements FilamentUser, HasTenants
 
     public function getTenants(Panel $panel): Collection
     {
-        return $this->allGroups();
+        return $this->groups;
     }
 
     public function canAccessTenant(Model $tenant): bool
     {
-        return $tenant instanceof Group && $this->allGroups()->contains('id', $tenant->id);
-    }
-
-    public function allGroups(): Collection
-    {
-        return $this->groups
-            ->concat($this->ownedGroups)
-            ->unique('id')
-            ->values();
+        return $tenant instanceof Group && $this->groups()->whereKey($tenant->getKey())->exists();
     }
 
     public function ownedGroups(): HasMany
@@ -102,11 +104,46 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         return $group->owner_id === $this->id;
     }
 
+    /**
+     * People who share a group see each other's photo and contact details.
+     */
+    public function sharesGroupWith(User $other): bool
+    {
+        return $this->groups()
+            ->whereIn('groups.id', $other->groups()->select('groups.id'))
+            ->exists();
+    }
+
     public function isModeratorIn(Group $group): bool
     {
         $role = $group->roleOf($this);
 
         return in_array($role, [GroupRole::Owner, GroupRole::Moderator], true);
+    }
+
+    public function getFilamentName(): string
+    {
+        return $this->fullName();
+    }
+
+    /**
+     * "10827 Berlin", or null while unknown.
+     */
+    public function location(): ?string
+    {
+        $location = trim(($this->postal_code ?? '').' '.($this->city ?? ''));
+
+        return $location !== '' ? $location : null;
+    }
+
+    /**
+     * The mobile number as a tel: link — digits and a leading plus only.
+     */
+    public function telephoneUri(): ?string
+    {
+        $number = preg_replace('/(?!^\+)[^\d]/', '', trim((string) $this->phone));
+
+        return filled($number) ? 'tel:'.$number : null;
     }
 
     public function fullName(): string

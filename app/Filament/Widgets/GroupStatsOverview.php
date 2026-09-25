@@ -17,6 +17,8 @@ class GroupStatsOverview extends BaseWidget
 
     protected int|string|array $columnSpan = 'full';
 
+    protected static ?int $sort = 3;
+
     protected function getStats(): array
     {
         $tenant = Filament::getTenant();
@@ -24,29 +26,16 @@ class GroupStatsOverview extends BaseWidget
             return [];
         }
 
-        $userId = auth()->id();
-        $activeRounds = Round::where('group_id', $tenant->id)
-            ->whereNotIn('phase', [RoundPhase::Completed->value, RoundPhase::Cancelled->value])
-            ->where(function ($q) use ($userId): void {
-                $q->where('phase', '!=', RoundPhase::Draft->value)
-                    ->orWhere('lead_user_id', $userId);
-            })
-            ->count();
-
         $completedRounds = Round::where('group_id', $tenant->id)
             ->where('phase', RoundPhase::Completed->value)
             ->count();
 
-        $members = $tenant->members()->count() + 1; // + Owner
+        $members = $tenant->members()->count();
 
         $visibleManufacturers = Manufacturer::visibleTo($tenant)->count();
         $visibleProducts = Product::visibleTo($tenant)->count();
 
         return [
-            Stat::make('Aktive Runden', $activeRounds)
-                ->description($activeRounds === 0 ? 'Starte gleich eine neue!' : 'in Bearbeitung')
-                ->descriptionIcon('heroicon-m-shopping-cart')
-                ->color($activeRounds > 0 ? 'warning' : 'gray'),
             Stat::make('Abgeschlossene Runden', $completedRounds)
                 ->description('in der Historie')
                 ->descriptionIcon('heroicon-m-archive-box-arrow-down')

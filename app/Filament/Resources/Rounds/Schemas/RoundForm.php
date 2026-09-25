@@ -4,22 +4,24 @@ namespace App\Filament\Resources\Rounds\Schemas;
 
 use App\Models\Group;
 use App\Models\Product;
-use App\Models\User;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Collection;
 
 /**
- * Form-Schema fürs Bearbeiten der "Eckdaten" einer bereits bestehenden Runde.
+ * Fields of a round, shared by the creation wizard and "Eckdaten bearbeiten".
  *
  * Bewusst _ohne_ phase-Feld — die Phase wird über die dedizierten Actions
- * "Bestellrunde starten" bzw. "Phase wechseln" verwaltet, nicht hier.
+ * "Bestellrunde starten" bzw. "Weiter zu …" verwaltet, nicht hier.
  */
 class RoundForm
 {
@@ -27,134 +29,229 @@ class RoundForm
     {
         return $schema->components([
             Section::make('Eckdaten')
-                ->schema([
-                    TextInput::make('title')
-                        ->label('Titel der Runde')
-                        ->placeholder('z. B. „Frühjahr-Bestellung 2026"')
-                        ->required()
-                        ->maxLength(255)
-                        ->columnSpan(2),
-                    Select::make('lead_user_id')
-                        ->label('Lead')
-                        ->options(function () {
-                            $group = Filament::getTenant();
-                            if (! $group instanceof Group) {
-                                return [];
-                            }
-
-                            return User::whereIn('id', $group->members()->pluck('users.id')->push($group->owner_id)->unique())
-                                ->orderBy('first_name')
-                                ->get()
-                                ->mapWithKeys(fn (User $u) => [$u->id => $u->fullName().' · '.$u->email])
-                                ->all();
-                        })
-                        ->default(fn () => auth()->id())
-                        ->searchable()
-                        ->required(),
-                    Textarea::make('description')
-                        ->label('Beschreibung / Notizen für die Teilnehmer')
-                        ->rows(3)
-                        ->columnSpanFull(),
-                ])->columns(3),
-
+                ->description('Den Lead wechselst du über „Weitere Aktionen → Lead-Rolle übergeben“ — mit Zustimmung der neuen Person.')
+                ->schema(static::basicsFields()),
             Section::make('Sortiment')
                 ->description('Welche Produkte sind in dieser Runde bestellbar? Leer lassen = alle für die Gruppe sichtbaren Produkte.')
-                ->schema([
-                    CheckboxList::make('available_products')
-                        ->relationship('availableProducts', 'name')
-                        ->options(fn () => Product::visibleTo(Filament::getTenant())
-                            ->with('manufacturer')
-                            ->orderBy('name')
-                            ->get()
-                            ->mapWithKeys(fn (Product $p) => [$p->id => $p->name])
-                            ->all())
-                        ->descriptions(fn () => Product::visibleTo(Filament::getTenant())
-                            ->with('manufacturer')
-                            ->orderBy('name')
-                            ->get()
-                            ->mapWithKeys(fn (Product $p) => [$p->id => ($p->manufacturer?->name ?? '—').' · '.$p->packagingSummary()])
-                            ->all())
-                        ->columns(2)
-                        ->bulkToggleable()
-                        ->hiddenLabel()
-                        ->columnSpanFull(),
-                ])->collapsed()->collapsible(),
-
-            Section::make('Deadlines')
-                ->schema([
-                    DatePicker::make('shopping_deadline')
-                        ->label('Ende Einkaufsphase')
-                        ->displayFormat('d.m.Y')
-                        ->native(false),
-                    DatePicker::make('negotiation_deadline')
-                        ->label('Ende Verhandlung')
-                        ->displayFormat('d.m.Y')
-                        ->native(false),
-                    DatePicker::make('finalization_deadline')
-                        ->label('Ende Bestätigung')
-                        ->displayFormat('d.m.Y')
-                        ->native(false),
-                    DatePicker::make('payment_deadline')
-                        ->label('Ende Zahlung')
-                        ->displayFormat('d.m.Y')
-                        ->native(false),
-                    DatePicker::make('expected_delivery')
-                        ->label('Voraussichtliche Lieferung')
-                        ->displayFormat('d.m.Y')
-                        ->native(false),
-                ])->columns(3)->collapsible(),
-
+                ->schema([static::productSelectionField()])
+                ->collapsed()
+                ->collapsible(),
+            Section::make('Zeitplan')
+                ->schema(static::scheduleFields())
+                ->columns(2)
+                ->collapsible(),
             Section::make('Abholung')
-                ->schema([
-                    Textarea::make('pickup_location')
-                        ->label('Abholort')
-                        ->placeholder('Adresse + Hinweise (z. B. Klingelschild, Tor-Code)')
-                        ->rows(2)
-                        ->columnSpanFull(),
-                    TextInput::make('max_participants')
-                        ->label('Maximale Teilnehmerzahl')
-                        ->numeric()
-                        ->helperText('Optional, z. B. wenn der Abholort begrenzt ist.'),
-                    Repeater::make('pickupDates')
-                        ->relationship()
-                        ->label('Abholtermine')
-                        ->schema([
-                            DatePicker::make('scheduled_at')
-                                ->label('Termin')
-                                ->required()
-                                ->displayFormat('d.m.Y')
-                                ->native(false),
-                            TextInput::make('location')
-                                ->label('Spezifischer Ort (optional)'),
-                            TextInput::make('notes')
-                                ->label('Hinweis'),
-                        ])
-                        ->columns(3)
-                        ->columnSpanFull()
-                        ->defaultItems(1)
-                        ->addActionLabel('Weiteren Abholtermin hinzufügen'),
-                ])->columns(2)->collapsible(),
-
+                ->schema(static::pickupFields())
+                ->columns(2)
+                ->collapsible(),
             Section::make('Finanzen')
-                ->schema([
-                    TextInput::make('lead_fee_percent')
-                        ->label('Aufwandsentschädigung Lead')
-                        ->numeric()
-                        ->step(0.01)
-                        ->minValue(0)
-                        ->maxValue(50)
-                        ->suffix('%')
-                        ->default(2.5),
-                    TextInput::make('platform_fee_percent')
-                        ->label('Vereinsbeitrag')
-                        ->numeric()
-                        ->step(0.01)
-                        ->minValue(0)
-                        ->maxValue(10)
-                        ->suffix('%')
-                        ->default(1.0)
-                        ->helperText('1 % geht an den Foodpecker-Verein.'),
-                ])->columns(2)->collapsible(),
+                ->schema(static::financeFields())
+                ->columns(2)
+                ->collapsible(),
         ]);
+    }
+
+    /**
+     * @return array<int, Step>
+     */
+    public static function wizardSteps(): array
+    {
+        return [
+            Step::make('Worum geht\'s?')
+                ->description('Titel und kurze Beschreibung der Runde — du bist der Lead')
+                ->icon(Heroicon::OutlinedSparkles)
+                ->schema(static::basicsFields()),
+            Step::make('Sortiment')
+                ->description('Welche Produkte sind diesmal bestellbar?')
+                ->icon(Heroicon::OutlinedShoppingCart)
+                ->schema([static::productSelectionField()]),
+            Step::make('Zeitplan')
+                ->description('Wann passiert was?')
+                ->icon(Heroicon::OutlinedCalendarDays)
+                ->schema(static::scheduleFields())
+                ->columns(2),
+            Step::make('Abholung')
+                ->description('Wo und wann holen die Teilnehmer die Ware ab?')
+                ->icon(Heroicon::OutlinedTruck)
+                ->schema(static::pickupFields())
+                ->columns(2),
+            Step::make('Finanzen')
+                ->description('Aufwandsentschädigung & Vereinsbeitrag')
+                ->icon(Heroicon::OutlinedBanknotes)
+                ->schema(static::financeFields())
+                ->columns(2),
+        ];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public static function basicsFields(): array
+    {
+        return [
+            TextInput::make('title')
+                ->label('Titel der Runde')
+                ->placeholder('z. B. „Frühjahr-Bestellung 2026“')
+                ->required()
+                ->maxLength(255)
+                ->helperText('Wie soll diese Bestellrunde heißen? Das sehen alle Teilnehmer.'),
+            Textarea::make('description')
+                ->label('Beschreibung (optional)')
+                ->placeholder('Worauf wollen wir uns dieses Mal konzentrieren? Was ist diesmal anders?')
+                ->rows(3)
+                ->maxLength(2000)
+                ->columnSpanFull(),
+        ];
+    }
+
+    public static function productSelectionField(): CheckboxList
+    {
+        return CheckboxList::make('available_products')
+            ->label('Bestellbare Produkte')
+            ->relationship('availableProducts', 'name')
+            ->options(fn (): array => static::selectableProducts()->mapWithKeys(fn (Product $product): array => [$product->id => $product->name])->all())
+            ->descriptions(fn (): array => static::selectableProducts()->mapWithKeys(fn (Product $product): array => [
+                $product->id => ($product->manufacturer?->name ?? '—').' · '.$product->packagingSummary(),
+            ])->all())
+            ->columns(2)
+            ->bulkToggleable()
+            ->helperText('Leer = alle für die Gruppe sichtbaren Produkte sind bestellbar. Die Auswahl lässt sich später jederzeit anpassen.')
+            ->columnSpanFull();
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public static function scheduleFields(): array
+    {
+        return [
+            DatePicker::make('shopping_deadline')
+                ->label('Ende Einkaufsphase')
+                ->native(false)
+                ->displayFormat('d.m.Y')
+                ->default(fn () => now()->addDays(14))
+                ->helperText('Bis wann sollen alle ihre Warenkörbe befüllt haben? Typisch: ca. 2 Wochen.'),
+            DatePicker::make('negotiation_deadline')
+                ->label('Ende Verhandlungsphase')
+                ->native(false)
+                ->displayFormat('d.m.Y')
+                ->default(fn () => now()->addDays(21))
+                ->afterOrEqual('shopping_deadline')
+                ->helperText('Bis dahin holt der Lead aktuelle Preise vom Hersteller. Typisch: ca. 5 Werktage.'),
+            DatePicker::make('finalization_deadline')
+                ->label('Ende Bestätigungsphase')
+                ->native(false)
+                ->displayFormat('d.m.Y')
+                ->default(fn () => now()->addDays(28))
+                ->afterOrEqual('negotiation_deadline')
+                ->helperText('Bis dahin müssen alle Beteiligten dem finalen Vorschlag zugestimmt haben.'),
+            DatePicker::make('payment_deadline')
+                ->label('Ende Zahlungsphase')
+                ->native(false)
+                ->displayFormat('d.m.Y')
+                ->default(fn () => now()->addDays(35))
+                ->afterOrEqual('finalization_deadline')
+                ->helperText('Bis dahin überweisen alle ihren Anteil an den Lead — außerhalb der Plattform.'),
+            DatePicker::make('expected_delivery')
+                ->label('Voraussichtliche Lieferung')
+                ->native(false)
+                ->displayFormat('d.m.Y')
+                ->default(fn () => now()->addDays(56))
+                ->helperText('Wann sollte die Ware beim Lead eintreffen? Grob geschätzt reicht.'),
+        ];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public static function pickupFields(): array
+    {
+        return [
+            Textarea::make('pickup_location')
+                ->label('Abholort')
+                ->required()
+                ->rows(2)
+                ->placeholder("Straße, Hausnummer, PLZ Ort\nHinweis (z. B. Klingelschild, Tor-Code)")
+                ->helperText('Wo holen die Teilnehmer ihre Ware ab? Adresse und ggf. Hinweise zum Hineinkommen.')
+                ->columnSpanFull(),
+            TextInput::make('max_participants')
+                ->label('Maximale Teilnehmerzahl (optional)')
+                ->integer()
+                ->minValue(2)
+                ->maxValue(100)
+                ->placeholder('z. B. 8')
+                ->helperText('Falls der Abholort begrenzt ist. Leer lassen = unbegrenzt.'),
+            Repeater::make('pickupDates')
+                ->relationship()
+                ->label('Abholtermine')
+                ->schema([
+                    DateTimePicker::make('scheduled_at')
+                        ->label('Termin')
+                        ->required()
+                        ->native(false)
+                        ->seconds(false)
+                        ->displayFormat('d.m.Y H:i'),
+                    TextInput::make('location')
+                        ->label('Spezifischer Ort (optional)')
+                        ->placeholder('Falls abweichend vom Hauptort')
+                        ->maxLength(255),
+                    TextInput::make('notes')
+                        ->label('Hinweis (optional)')
+                        ->placeholder('z. B. „nur Samstags“')
+                        ->maxLength(255),
+                ])
+                ->columns(3)
+                ->columnSpanFull()
+                ->defaultItems(1)
+                ->addActionLabel('Weiteren Abholtermin hinzufügen')
+                ->helperText('1–3 Termine, zu denen Teilnehmer abholen können. Mindestens einer wird für den Start der Einkaufsphase benötigt.'),
+        ];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public static function financeFields(): array
+    {
+        return [
+            TextInput::make('lead_fee_percent')
+                ->label('Aufwandsentschädigung für den Lead')
+                ->numeric()
+                ->step(0.01)
+                ->minValue(0)
+                ->maxValue(50)
+                ->suffix('% der Bestellsumme')
+                ->default(2.5)
+                ->required()
+                ->helperText('Für das Koordinieren der Runde. Wandert mit, falls der Lead-Status während der Runde übergeben wird. Typisch: 0–5 %.'),
+            TextInput::make('platform_fee_percent')
+                ->label('Beitrag an den Foodpecker-Verein')
+                ->numeric()
+                ->step(0.01)
+                ->minValue(0)
+                ->maxValue(10)
+                ->suffix('% der Bestellsumme')
+                ->default(fn (): float => (float) config('foodpecker.platform_fee_percent', 1.0))
+                ->required()
+                ->helperText('Finanziert Betrieb und Weiterentwicklung der Plattform.'),
+        ];
+    }
+
+    private static function currentGroup(): ?Group
+    {
+        $tenant = Filament::getTenant();
+
+        return $tenant instanceof Group ? $tenant : null;
+    }
+
+    /**
+     * @return Collection<int, Product>
+     */
+    private static function selectableProducts(): Collection
+    {
+        return once(fn () => Product::visibleTo(static::currentGroup())
+            ->with(['manufacturer', 'priceTiers'])
+            ->orderBy('name')
+            ->get());
     }
 }

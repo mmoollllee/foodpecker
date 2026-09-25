@@ -4,10 +4,12 @@ namespace App\Models;
 
 use App\Concerns\HasActivities;
 use App\Enums\ProposalStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Support\Collection;
 
 class OrderProposal extends Model
 {
@@ -27,6 +29,7 @@ class OrderProposal extends Model
     {
         return [
             'status' => ProposalStatus::class,
+            'shipping_cents' => 'integer',
             'published_at' => 'datetime',
         ];
     }
@@ -66,13 +69,41 @@ class OrderProposal extends Model
         );
     }
 
-    public function isPublished(): bool
+    /**
+     * Proposals that are (or were) up for a vote: published or chosen.
+     */
+    public function scopeOpenForVoting(Builder $query): Builder
     {
-        return $this->status === ProposalStatus::Published || $this->status === ProposalStatus::Chosen;
+        return $query->whereIn('status', [ProposalStatus::Published->value, ProposalStatus::Chosen->value]);
     }
 
-    public function totalGoodsCents(): int
+    public function isDraft(): bool
     {
-        return (int) $this->items->sum('total_price_cents');
+        return $this->status === ProposalStatus::Draft;
+    }
+
+    public function isPublished(): bool
+    {
+        return $this->status === ProposalStatus::Published;
+    }
+
+    public function isProposedBy(User $user): bool
+    {
+        return $this->proposed_by_user_id === $user->getKey();
+    }
+
+    /**
+     * Users who receive something from this proposal.
+     *
+     * @return Collection<int, int>
+     */
+    public function includedUserIds(): Collection
+    {
+        return $this->allocations()
+            ->where('quantity', '>', 0)
+            ->pluck('proposal_allocations.user_id')
+            ->map(fn ($userId): int => (int) $userId)
+            ->unique()
+            ->values();
     }
 }

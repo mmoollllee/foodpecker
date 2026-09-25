@@ -7,20 +7,24 @@ use App\Concerns\HasAttachments;
 use App\Concerns\HasNotes;
 use App\Enums\PackagingStrategy;
 use App\Enums\ProductCategory;
+use App\Enums\ProductUnit;
 use App\Enums\Visibility;
 use Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
-    use HasActivities, HasAttachments, HasFactory, HasNotes;
+    use HasActivities, HasAttachments, HasFactory, HasNotes, SoftDeletes;
 
     protected $fillable = [
         'group_id',
@@ -42,8 +46,10 @@ class Product extends Model
     {
         return [
             'visibility' => Visibility::class,
+            'unit' => ProductUnit::class,
             'category' => ProductCategory::class,
             'packaging_strategy' => PackagingStrategy::class,
+            'estimated_price_cents' => 'integer',
             'estimated_price_per_unit' => 'decimal:4',
         ];
     }
@@ -53,6 +59,50 @@ class Product extends Model
         static::creating(function (self $p): void {
             if (blank($p->slug)) {
                 $p->slug = Str::slug($p->name).'-'.Str::lower(Str::random(4));
+            }
+        });
+
+        static::created(fn (self $product) => $product->logActivity('created', ['title' => $product->name]));
+
+        static::updated(function (self $product): void {
+            $fields = array_keys(Arr::except($product->getChanges(), ['updated_at', 'deleted_at', 'slug']));
+
+            if ($fields !== []) {
+                $product->logActivity('updated', ['fields' => $fields]);
+            }
+        });
+
+        static::deleted(function (self $product): void {
+            if (! $product->isForceDeleting()) {
+                $product->logActivity('archived');
+            }
+        });
+
+        static::restored(fn (self $product) => $product->logActivity('restored'));
+
+        // A replaced or removed image is not needed anymore.
+        static::updated(function (self $product): void {
+            if ($product->wasChanged('image_path')) {
+                $product->deleteImageFile($product->getOriginal('image_path'));
+            }
+        });
+
+        static::forceDeleted(fn (self $product) => $product->deleteImageFile($product->image_path));
+    }
+
+    /**
+     * Removes an image file once the change is committed — unless another
+     * product still shows the same file. Archived products keep theirs.
+     */
+    private function deleteImageFile(?string $path): void
+    {
+        if (blank($path)) {
+            return;
+        }
+
+        $this->getConnection()->afterCommit(function () use ($path): void {
+            if (static::withTrashed()->where('image_path', $path)->doesntExist()) {
+                Storage::disk('public')->delete($path);
             }
         });
     }
@@ -72,14 +122,58 @@ class Product extends Model
         return $this->hasMany(PriceTier::class)->orderBy('sort_order')->orderBy('package_amount');
     }
 
-    public function defaultTier(): ?PriceTier
-    {
-        return $this->priceTiers()->first();
-    }
-
     public function priceObservations(): HasMany
     {
-        return $this->hasMany(PriceObservation::class)->orderByDesc('observed_on');
+        return $this->hasMany(PriceObservation::class)->orderByDesc('observed_on')->orderByDesc('id');
+    }
+
+    public function cartItems(): HasMany
+    {
+        return $this->hasMany(CartItem::class);
+    }
+
+    public function proposalItems(): HasMany
+    {
+        return $this->hasMany(ProposalItem::class);
+    }
+
+    /**
+     * Whether carts, proposals or the price history point to this product —
+     * then it can only be archived, not deleted for good.
+     */
+    public function isReferenced(): bool
+    {
+        return $this->cartItems()->exists()
+            || $this->proposalItems()->exists()
+            || $this->priceObservations()->exists();
+    }
+
+    public function isPublic(): bool
+    {
+        return $this->visibility === Visibility::Public;
+    }
+
+    /**
+     * Prices paid in real orders: the group's own, plus those of other
+     * groups for shared products.
+     *
+     * @return Collection<int, PriceObservation>
+     */
+    public function recentPriceObservations(?Group $group, int $limit = 3): Collection
+    {
+        return $this->priceObservations()
+            ->with('group:id,name')
+            ->when(! $this->isPublic(), fn (Builder $query) => $query->where('group_id', $group?->id))
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Short unit label for quantities, e.g. "kg" or "Glas".
+     */
+    public function unitLabel(): string
+    {
+        return $this->unit?->shortLabel() ?? '';
     }
 
     public function scopeVisibleTo(Builder $query, ?Group $group): Builder

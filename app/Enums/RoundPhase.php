@@ -73,11 +73,6 @@ enum RoundPhase: string implements HasColor, HasIcon, HasLabel
         return ! in_array($this, [self::Completed, self::Cancelled], true);
     }
 
-    public function isLocked(): bool
-    {
-        return in_array($this, [self::Completed, self::Cancelled, self::Ordering, self::Delivery, self::Pickup], true);
-    }
-
     /**
      * @return array<int, RoundPhase>
      */

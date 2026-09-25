@@ -4,20 +4,22 @@ namespace App\Filament\Resources\Rounds\Tables;
 
 use App\Enums\RoundPhase;
 use App\Models\Round;
-use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class RoundsTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->with('lead')
+                ->withCount(['activeParticipants as participants_count', 'cartItems']))
             ->columns([
                 TextColumn::make('title')
                     ->label('Bestellrunde')
@@ -30,12 +32,10 @@ class RoundsTable
                     ->badge(),
                 TextColumn::make('participants_count')
                     ->label('Teilnehmer')
-                    ->state(fn (Round $r) => $r->participants()->count())
                     ->badge()
                     ->color('info'),
                 TextColumn::make('cart_items_count')
                     ->label('Artikel')
-                    ->state(fn (Round $r) => $r->cartItems()->count())
                     ->badge()
                     ->color('gray'),
                 TextColumn::make('shopping_deadline')
@@ -68,14 +68,9 @@ class RoundsTable
             ->recordActions([
                 ViewAction::make()->label('Öffnen'),
                 EditAction::make()->label('Bearbeiten')->slideOver(),
-                DeleteAction::make()->label('Löschen'),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
-            ])
-            ->emptyStateHeading('Noch keine Bestellrunden')
-            ->emptyStateDescription('Starte eine neue Runde — die Einkaufsphase ist dann sofort offen.');
+                DeleteAction::make()
+                    ->label('Löschen')
+                    ->modalDescription('Nur Entwürfe und abgebrochene Runden können gelöscht werden.'),
+            ]);
     }
 }

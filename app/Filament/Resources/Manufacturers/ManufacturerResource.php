@@ -4,11 +4,12 @@ namespace App\Filament\Resources\Manufacturers;
 
 use App\Enums\Visibility;
 use App\Filament\Resources\Manufacturers\Pages\ManageManufacturers;
+use App\Filament\Resources\Manufacturers\Pages\ViewManufacturer;
+use App\Filament\Resources\Manufacturers\RelationManagers\ProductsRelationManager;
 use App\Models\Manufacturer;
 use BackedEnum;
-use Filament\Actions\BulkActionGroup;
+use Closure;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
@@ -58,7 +59,14 @@ class ManufacturerResource extends Resource
                         ->options(Visibility::class)
                         ->default(Visibility::Private->value)
                         ->required()
-                        ->helperText('Öffentliche Hersteller können von allen Gruppen verwendet werden.'),
+                        ->rule(fn (?Manufacturer $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                            $newVisibility = $value instanceof Visibility ? $value : Visibility::tryFrom((string) $value);
+
+                            if ($record?->isPublic() && $newVisibility === Visibility::Private && $record->isUsedByOtherGroups()) {
+                                $fail('Andere Gruppen bestellen bereits bei diesem Hersteller — er muss öffentlich bleiben.');
+                            }
+                        })
+                        ->helperText('Öffentliche Hersteller können alle Gruppen nutzen, ändern kann sie nur eure Gruppe. Wird ein Hersteller privat, werden auch seine Produkte privat.'),
                     TextInput::make('website')
                         ->label('Website')
                         ->url()
@@ -106,9 +114,10 @@ class ManufacturerResource extends Resource
                     ->label('Sichtbarkeit')
                     ->badge(),
                 TextColumn::make('group.name')
-                    ->label('Gruppe')
-                    ->placeholder('— öffentlich —')
-                    ->color('gray'),
+                    ->label('Gehört zu')
+                    ->placeholder('—')
+                    ->color('gray')
+                    ->toggleable(),
                 TextColumn::make('products_count')
                     ->label('Produkte')
                     ->counts('products')
@@ -131,20 +140,26 @@ class ManufacturerResource extends Resource
                     ->toggleable(),
             ])
             ->defaultSort('name')
+            ->recordUrl(fn (Manufacturer $record): string => static::getUrl('view', ['record' => $record]))
             ->filters([
                 SelectFilter::make('visibility')
                     ->label('Sichtbarkeit')
                     ->options(Visibility::class),
             ])
             ->recordActions([
-                ViewAction::make()->label('Ansehen')->slideOver(),
-                EditAction::make()->label('Bearbeiten')->modalWidth('4xl'),
-                DeleteAction::make()->label('Löschen'),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
+                ViewAction::make()
+                    ->label('Ansehen')
+                    ->url(fn (Manufacturer $record): string => static::getUrl('view', ['record' => $record])),
+                EditAction::make()
+                    ->label('Bearbeiten')
+                    ->modalWidth('4xl')
+                    ->mutateDataUsing(fn (array $data, Manufacturer $record): array => [
+                        ...$data,
+                        'group_id' => $record->group_id ?? Filament::getTenant()?->getKey(),
+                    ]),
+                DeleteAction::make()
+                    ->label('Löschen')
+                    ->modalDescription('Nur Hersteller ohne Produkte können gelöscht werden.'),
             ])
             ->emptyStateHeading('Noch keine Hersteller')
             ->emptyStateDescription('Lege einen Hersteller an, um Produkte zu pflegen.');
@@ -155,15 +170,16 @@ class ManufacturerResource extends Resource
         return parent::getEloquentQuery()->visibleTo(Filament::getTenant());
     }
 
+    /**
+     * New manufacturers belong to the current group, even when shared.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
     public static function mutateFormDataBeforeCreate(array $data): array
     {
-        $tenant = Filament::getTenant();
         $data['created_by_user_id'] = auth()->id();
-        if (($data['visibility'] ?? Visibility::Private->value) === Visibility::Public->value) {
-            $data['group_id'] = null;
-        } else {
-            $data['group_id'] = $tenant?->id;
-        }
+        $data['group_id'] = Filament::getTenant()?->getKey();
 
         return $data;
     }
@@ -173,10 +189,18 @@ class ManufacturerResource extends Resource
         return $record?->name;
     }
 
+    public static function getRelations(): array
+    {
+        return [
+            ProductsRelationManager::class,
+        ];
+    }
+
     public static function getPages(): array
     {
         return [
             'index' => ManageManufacturers::route('/'),
+            'view' => ViewManufacturer::route('/{record}'),
         ];
     }
 }

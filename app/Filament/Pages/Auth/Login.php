@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Auth;
 
+use App\Http\Controllers\InvitationController;
 use Filament\Auth\Pages\Login as BaseLogin;
 use Filament\Schemas\Components\Component;
 
@@ -11,7 +12,8 @@ class Login extends BaseLogin
     {
         parent::mount();
 
-        if (app()->isLocal()) {
+        // Demo credentials only help locally — and not for somebody following an invitation.
+        if (app()->isLocal() && ! session()->has(InvitationController::SESSION_KEY)) {
             $this->form->fill([
                 'email' => config('foodpecker.demo.owner_email'),
                 'password' => config('foodpecker.demo.owner_password'),

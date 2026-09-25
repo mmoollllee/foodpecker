@@ -5,13 +5,13 @@
             Was steht für dich an?
         </x-slot>
         <x-slot name="description">
-            Personalisierte Aufgabenliste aus allen aktiven Runden dieser Gruppe.
+            Deine nächsten Schritte in der laufenden Bestellrunde und in der Gruppe.
         </x-slot>
 
         @if (empty($tasks))
             <div class="text-center py-8 text-gray-500">
                 <div class="text-3xl mb-2">☕</div>
-                <p class="text-sm">Gerade nichts zu tun — entspann dich, oder starte eine neue Bestellrunde.</p>
+                <p class="text-sm">Gerade nichts zu tun — entspann dich.</p>
             </div>
         @else
             <div class="space-y-2">

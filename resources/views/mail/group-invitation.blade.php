@@ -1,18 +1,24 @@
+<x-mail::message>
+# Einladung zu „{{ $group->name }}“
+
 Hallo,
 
 @if ($invitedBy)
-{{ $invitedBy }} hat Dich zur Gruppe **{{ $group->name }}** bei Foodpecker eingeladen.
+{{ $invitedBy }} hat dich zur Gruppe **{{ $group->name }}** bei Foodpecker eingeladen.
 @else
 Du wurdest zur Gruppe **{{ $group->name }}** bei Foodpecker eingeladen.
 @endif
 
-Foodpecker ist eine Plattform, mit der Freundesgruppen gemeinsam direkt beim Hersteller Lebensmittel in größeren Mengen bestellen können.
+Mit Foodpecker bestellen Freundesgruppen gemeinsam direkt beim Hersteller Lebensmittel in größeren Mengen.
 
-Klicke auf den folgenden Link, um die Einladung anzunehmen. Falls Du noch kein Konto hast, kannst Du Dich im Anschluss direkt registrieren — Deine Mailadresse ist bereits vorausgefüllt.
+<x-mail::button :url="$acceptUrl">
+Einladung annehmen
+</x-mail::button>
 
-[Einladung annehmen]({{ $acceptUrl }})
+Falls du noch kein Konto hast, kannst du dich im Anschluss direkt registrieren — deine Mailadresse ist bereits eingetragen. Wenn du schon ein Konto hast, meldest du dich einfach an.
 
-Der Link ist gültig bis {{ $invitation->expires_at?->format('d.m.Y H:i') }}.
+Der Link ist gültig bis {{ $invitation->expires_at?->format('d.m.Y H:i') }} Uhr.
 
-Viele Grüße
+Viele Grüße<br>
 Dein Foodpecker
+</x-mail::message>

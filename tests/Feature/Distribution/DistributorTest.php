@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\Round;
 use App\Models\User;
 use App\Services\Distribution\Distributor;
+use App\Services\Distribution\PackageSpec;
 
 beforeEach(function () {
     $this->distributor = new Distributor;
@@ -189,4 +190,59 @@ it('liefert leere Allokation für leeren Warenkorb', function () {
     expect($r->packagesOrdered)->toBe(0)
         ->and($r->allocations)->toBe([])
         ->and($r->feasible)->toBeTrue();
+});
+
+it('distributes a package count chosen by the lead and reports the leftover', function () {
+    $tier = PriceTier::create([
+        'product_id' => $this->product->id,
+        'label' => '10 kg', 'package_amount' => 10.0,
+        'price_cents' => 3000, 'is_divisible' => true, 'divisible_step' => 1,
+    ]);
+
+    $items = collect([
+        buildCartItem($this->round, $this->product, 'exact', 6),
+        buildCartItem($this->round, $this->product, 'flexible', null, 2, 8),
+    ]);
+
+    $result = $this->distributor->compute($items, $tier, packages: 2);
+
+    expect($result->packagesOrdered)->toBe(2)
+        ->and($result->totalPriceCents)->toBe(6000)
+        ->and($result->sumAllocated())->toBe(14.0)
+        ->and($result->unallocatedQuantity)->toBe(6.0)
+        ->and($result->feasible)->toBeFalse()
+        ->and(collect($result->allocations)->sum('shareCents'))->toBe(6000);
+});
+
+it('cuts the wishes in proportion when fewer packages are ordered than wanted', function () {
+    $tier = PriceTier::create([
+        'product_id' => $this->product->id,
+        'label' => '10 kg', 'package_amount' => 10.0,
+        'price_cents' => 3000, 'is_divisible' => true, 'divisible_step' => 1,
+    ]);
+
+    $items = collect([
+        buildCartItem($this->round, $this->product, 'exact', 10),
+        buildCartItem($this->round, $this->product, 'exact', 10),
+    ]);
+
+    $result = $this->distributor->compute($items, $tier, packages: 1);
+
+    expect(collect($result->allocations)->pluck('allocatedQuantity')->all())->toBe([5.0, 5.0])
+        ->and($result->feasible)->toBeFalse()
+        ->and($result->notes)->toContain('Es fehlen 10 kg zu den Mindestwünschen.');
+});
+
+it('uses a negotiated package price', function () {
+    $tier = PriceTier::create([
+        'product_id' => $this->product->id,
+        'label' => '5 kg', 'package_amount' => 5.0,
+        'price_cents' => 1850, 'is_divisible' => true, 'divisible_step' => 0.1,
+    ]);
+
+    $items = collect([buildCartItem($this->round, $this->product, 'exact', 5)]);
+
+    $result = $this->distributor->compute($items, PackageSpec::fromTier($tier, 1600));
+
+    expect($result->totalPriceCents)->toBe(1600);
 });

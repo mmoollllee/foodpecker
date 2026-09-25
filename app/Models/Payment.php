@@ -18,10 +18,22 @@ class Payment extends Model
         'notes',
     ];
 
+    /**
+     * Mirrors the column defaults, so new payments are pending right away.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => 'pending',
+        'round_up_donation_cents' => 0,
+    ];
+
     protected function casts(): array
     {
         return [
             'status' => PaymentStatus::class,
+            'amount_cents' => 'integer',
+            'round_up_donation_cents' => 'integer',
             'paid_at' => 'datetime',
         ];
     }
@@ -39,5 +51,10 @@ class Payment extends Model
     public function totalCents(): int
     {
         return (int) $this->amount_cents + (int) $this->round_up_donation_cents;
+    }
+
+    public function isSettled(): bool
+    {
+        return in_array($this->status, [PaymentStatus::Paid, PaymentStatus::Waived], true);
     }
 }

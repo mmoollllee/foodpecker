@@ -2,10 +2,10 @@
 
 namespace App\Filament\Pages\Auth;
 
+use App\Filament\Forms\UserFields;
 use App\Http\Controllers\InvitationController;
 use App\Models\GroupInvitation;
 use Filament\Auth\Pages\Register as BaseRegister;
-use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -50,17 +50,14 @@ class Register extends BaseRegister
                     ? 'Lege Dein Konto an, um der Gruppe als '.$this->invitation->role->getLabel().' beizutreten.'
                     : 'Foodpecker ist nur nach Registrierung nutzbar. Du kannst entweder eine eigene Gruppe gründen oder einer Gruppe per Einladung beitreten.')
                 ->schema([
-                    TextInput::make('first_name')
-                        ->label('Vorname')
-                        ->required()
-                        ->maxLength(255)
-                        ->autofocus(),
-                    TextInput::make('last_name')
-                        ->label('Nachname')
-                        ->required()
-                        ->maxLength(255),
+                    UserFields::firstName()->autofocus(),
+                    UserFields::lastName(),
                     $this->getEmailFormComponent(),
-                    $this->getPasswordFormComponent(),
+                    UserFields::mobilePhone(),
+                    UserFields::postalCode(),
+                    UserFields::city(),
+                    UserFields::householdSize(),
+                    $this->getPasswordFormComponent()->columnStart(1),
                     $this->getPasswordConfirmationFormComponent(),
                 ])->columns(2),
         ]);

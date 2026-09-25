@@ -2,13 +2,13 @@
 
 namespace App\Filament\Resources\Rounds;
 
-use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\Pages\CreateRound;
 use App\Filament\Resources\Rounds\Pages\ListRounds;
 use App\Filament\Resources\Rounds\Pages\ViewRound;
 use App\Filament\Resources\Rounds\Schemas\RoundForm;
 use App\Filament\Resources\Rounds\Tables\RoundsTable;
 use App\Models\Round;
+use App\Models\User;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -54,16 +54,13 @@ class RoundResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
+        $user = auth()->user();
 
-        $userId = auth()->id();
-        if ($userId === null) {
+        if (! $user instanceof User) {
             return $query->whereRaw('1 = 0');
         }
 
-        return $query->where(function (Builder $q) use ($userId): void {
-            $q->where('phase', '!=', RoundPhase::Draft->value)
-                ->orWhere('lead_user_id', $userId);
-        });
+        return $query->visibleTo($user);
     }
 
     public static function getPages(): array

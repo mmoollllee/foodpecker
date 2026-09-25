@@ -102,6 +102,8 @@ class GroupInvitation extends Model
                 'role' => $this->role->value,
                 'joined_at' => now(),
             ]);
+
+            $this->group->logActivity('member_joined', ['role' => $this->role->value], $user);
         }
 
         $this->forceFill(['accepted_at' => now()])->save();

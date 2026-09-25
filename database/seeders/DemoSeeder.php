@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\GroupRole;
+use App\Enums\NotificationKind;
 use App\Enums\PackagingStrategy;
 use App\Enums\PaymentStatus;
 use App\Enums\ProductCategory;
@@ -22,13 +23,14 @@ use App\Models\PickupDate;
 use App\Models\PriceObservation;
 use App\Models\PriceTier;
 use App\Models\Product;
-use App\Models\ProposalAllocation;
-use App\Models\ProposalItem;
 use App\Models\ProposalVote;
 use App\Models\Round;
 use App\Models\RoundParticipant;
 use App\Models\User;
-use App\Services\Distribution\Distributor;
+use App\Services\Distribution\PackageSpec;
+use App\Services\Money\OrderCalculator;
+use App\Services\Notifications\DraftBuilder;
+use App\Services\Proposals\ProposalBuilder;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
@@ -42,13 +44,13 @@ class DemoSeeder extends Seeder
         $this->command->info('🪶 Foodpecker Demo-Daten werden angelegt …');
 
         // ---------------- Users ----------------
-        $marie = $this->makeUser('Marie', 'Kerres', 'marie@foodpecker.test');
-        $tobias = $this->makeUser('Tobias', 'Hartmann', 'tobias@foodpecker.test');
-        $sara = $this->makeUser('Sara', 'Bauer', 'sara@foodpecker.test');
-        $linus = $this->makeUser('Linus', 'Vogel', 'linus@foodpecker.test');
-        $aylin = $this->makeUser('Aylin', 'Yıldız', 'aylin@foodpecker.test');
-        $jonas = $this->makeUser('Jonas', 'Hofmann', 'jonas@foodpecker.test');
-        $kira = $this->makeUser('Kira', 'Lehmann', 'kira@foodpecker.test');
+        $marie = $this->makeUser('Marie', 'Kerres', 'marie@foodpecker.test', '+49 171 2345678', '10827', 3);
+        $tobias = $this->makeUser('Tobias', 'Hartmann', 'tobias@foodpecker.test', '+49 160 9876543', '12305', 4, nickname: 'Tobi');
+        $sara = $this->makeUser('Sara', 'Bauer', 'sara@foodpecker.test', '+49 176 5550123', '10823', 2);
+        $linus = $this->makeUser('Linus', 'Vogel', 'linus@foodpecker.test', '+49 152 3334455', '12157', 5, nickname: 'Lino');
+        $aylin = $this->makeUser('Aylin', 'Yıldız', 'aylin@foodpecker.test', '+49 157 7788990', '10827', 1);
+        $jonas = $this->makeUser('Jonas', 'Hofmann', 'jonas@foodpecker.test', '+49 170 1122334', '10781', 2);
+        $kira = $this->makeUser('Kira', 'Lehmann', 'kira@foodpecker.test', '+49 179 4455667', '12307', 3);
 
         // ---------------- Gruppen ----------------
         $schoeneberg = Group::create([
@@ -89,12 +91,16 @@ class DemoSeeder extends Seeder
         $this->attach($familie, $linus, GroupRole::Owner);
         $this->attach($familie, $sara, GroupRole::Moderator);
 
+        foreach ([$schoeneberg, $lichtenrade, $familie] as $group) {
+            $this->backdateFounding($group);
+        }
+
         $marie->update(['current_group_id' => $schoeneberg->id]);
         $tobias->update(['current_group_id' => $schoeneberg->id]);
 
         // ---------------- Hersteller ----------------
         $spielberger = Manufacturer::create([
-            'group_id' => null,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Spielberger Mühle',
             'slug' => 'spielberger-muehle',
@@ -106,8 +112,9 @@ class DemoSeeder extends Seeder
             'created_by_user_id' => $marie->id,
         ]);
 
+        // Owned by another group — Schöneberg may use it, but not change it.
         $pastaItalia = Manufacturer::create([
-            'group_id' => null,
+            'group_id' => $lichtenrade->id,
             'visibility' => Visibility::Public,
             'name' => 'Pasta Italia Genossenschaft',
             'slug' => 'pasta-italia',
@@ -119,7 +126,7 @@ class DemoSeeder extends Seeder
         ]);
 
         $senfwerk = Manufacturer::create([
-            'group_id' => null,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Senfwerk Düsseldorf',
             'slug' => 'senfwerk-duesseldorf',
@@ -144,7 +151,7 @@ class DemoSeeder extends Seeder
         ]);
 
         $nudelschmiede = Manufacturer::create([
-            'group_id' => null,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Nudelschmiede Süd',
             'slug' => 'nudelschmiede-sued',
@@ -158,7 +165,7 @@ class DemoSeeder extends Seeder
         // Szenario 1 — Feste Paketgröße: Dinkelmehl 25/50 kg (teilbar)
         $dinkelmehl = Product::create([
             'manufacturer_id' => $spielberger->id,
-            'group_id' => null,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Bio Dinkelmehl Type 630',
             'slug' => 'bio-dinkelmehl-630',
@@ -175,6 +182,7 @@ class DemoSeeder extends Seeder
         // Szenario 2 — Mengenstaffel mit Preisvorteil: Bio-Reis 10/25/50 kg
         $reis = Product::create([
             'manufacturer_id' => $spielberger->id,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Bio Basmati Reis',
             'slug' => 'bio-basmati-reis',
@@ -192,6 +200,7 @@ class DemoSeeder extends Seeder
         // Szenario 3 — Palette mit teilbaren Einheiten: Senf (12er-Schritte, einzeln verteilbar)
         $senf = Product::create([
             'manufacturer_id' => $senfwerk->id,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Düsseldorfer Senf scharf',
             'slug' => 'duesseldorfer-senf-scharf',
@@ -207,6 +216,7 @@ class DemoSeeder extends Seeder
         // Szenario 4a — Mehrere feste, nicht teilbare Packungen: Spaghetti 250 g / 2 kg
         $spaghetti = Product::create([
             'manufacturer_id' => $pastaItalia->id,
+            'group_id' => $lichtenrade->id,
             'visibility' => Visibility::Public,
             'name' => 'Spaghetti N. 5 (Bronzeziehung)',
             'slug' => 'spaghetti-bronze',
@@ -223,6 +233,7 @@ class DemoSeeder extends Seeder
         // Szenario 4b — Großgebinde mit individueller Abwiegung: Spirelli 5 kg Karton
         $spirelli = Product::create([
             'manufacturer_id' => $nudelschmiede->id,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Spirelli aus Hartweizen',
             'slug' => 'spirelli-hartweizen',
@@ -238,6 +249,7 @@ class DemoSeeder extends Seeder
         // Bonus-Produkte
         $polenta = Product::create([
             'manufacturer_id' => $spielberger->id,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Bio Polenta grob',
             'slug' => 'bio-polenta-grob',
@@ -252,6 +264,7 @@ class DemoSeeder extends Seeder
 
         $hafer = Product::create([
             'manufacturer_id' => $spielberger->id,
+            'group_id' => $schoeneberg->id,
             'visibility' => Visibility::Public,
             'name' => 'Bio Haferflocken kernig',
             'slug' => 'bio-haferflocken-kernig',
@@ -323,7 +336,7 @@ class DemoSeeder extends Seeder
             'phase_changed_at' => Carbon::parse('2025-10-25 14:00'),
         ]);
 
-        PickupDate::create([
+        $completedPickupDate = PickupDate::create([
             'round_id' => $completed->id,
             'scheduled_at' => '2025-10-22 18:00',
             'location' => 'Schöneberger Speisekammer',
@@ -364,31 +377,34 @@ class DemoSeeder extends Seeder
 
         $completed->update(['chosen_proposal_id' => $chosenProposal->id]);
 
-        // Votes (alle Daumen hoch)
-        foreach ($chosenProposal->items as $item) {
-            foreach ([$marie, $tobias, $sara, $linus, $aylin] as $voter) {
+        // Votes: every stakeholder approved every item they receive a share of
+        foreach ($chosenProposal->items()->with('allocations')->get() as $item) {
+            foreach ($item->stakeholderIds() as $voterId) {
                 ProposalVote::create([
                     'proposal_item_id' => $item->id,
-                    'user_id' => $voter->id,
+                    'user_id' => $voterId,
                     'value' => VoteValue::Up->value,
                 ]);
             }
         }
 
-        // Payments + Pickups + Preis-Beobachtungen
-        foreach ([$marie, $tobias, $sara, $linus, $aylin] as $u) {
+        // Payments + Pickups + Preis-Beobachtungen — amounts as the calculator computes them
+        $completedTotals = app(OrderCalculator::class)->calculate($chosenProposal->fresh(['items.allocations', 'round.participants']));
+
+        foreach ($completedTotals->perParticipant as $index => $share) {
             Payment::create([
                 'round_id' => $completed->id,
-                'user_id' => $u->id,
-                'amount_cents' => 4500 + ($u->id * 200),
-                'round_up_donation_cents' => $u->id % 2 ? 50 : 0,
+                'user_id' => $share->userId,
+                'amount_cents' => $share->subtotalCents(),
+                'round_up_donation_cents' => $index % 2 === 0 ? 50 : 0,
                 'status' => PaymentStatus::Paid,
-                'paid_at' => Carbon::parse('2025-10-04 12:00')->addHours($u->id),
+                'paid_at' => Carbon::parse('2025-10-04 12:00')->addHours($index),
             ]);
             Pickup::create([
                 'round_id' => $completed->id,
-                'user_id' => $u->id,
-                'picked_up_at' => Carbon::parse('2025-10-22 19:00')->addMinutes($u->id * 15),
+                'user_id' => $share->userId,
+                'pickup_date_id' => $completedPickupDate->id,
+                'picked_up_at' => Carbon::parse('2025-10-22 19:00')->addMinutes($index * 15),
             ]);
         }
 
@@ -398,8 +414,8 @@ class DemoSeeder extends Seeder
                 'price_tier_id' => $item->price_tier_id,
                 'round_id' => $completed->id,
                 'group_id' => $schoeneberg->id,
-                'observed_price_cents' => $item->priceTier->price_cents,
-                'package_amount' => $item->priceTier->package_amount,
+                'observed_price_cents' => $item->package_price_cents,
+                'package_amount' => $item->package_amount,
                 'observed_on' => '2025-10-04',
             ]);
         }
@@ -515,42 +531,59 @@ class DemoSeeder extends Seeder
             shippingCents: 7900,
         );
 
-        // Votes — Mischmasch
-        $voters = [$marie, $tobias, $sara, $linus, $aylin, $jonas];
-        foreach ($proposalA->items as $idx => $item) {
-            foreach ($voters as $i => $voter) {
-                $val = ($idx + $i) % 7 === 0 ? VoteValue::Down : VoteValue::Up;
+        // Votes — Vorschlag A: alle Betroffenen stimmen zu, nur Jonas blockiert den Reis.
+        // Genau der Fall, für den der Lead ihn ausschließen und neu abstimmen lassen kann.
+        foreach ($proposalA->items()->with('allocations')->get() as $item) {
+            foreach ($item->stakeholderIds() as $voterId) {
+                $blocks = $voterId === $jonas->id && $item->product_id === $reis->id;
+
                 ProposalVote::create([
                     'proposal_item_id' => $item->id,
-                    'user_id' => $voter->id,
-                    'value' => $val->value,
-                    'reason' => $val === VoteValue::Down ? 'Mir wäre eine kleinere Menge lieber, mein Keller ist eh schon voll.' : null,
+                    'user_id' => $voterId,
+                    'value' => ($blocks ? VoteValue::Down : VoteValue::Up)->value,
+                    'reason' => $blocks ? 'Ein halber 50-kg-Sack ist mir zu viel, ich will höchstens 5 kg.' : null,
                 ]);
             }
         }
-        foreach ($proposalB->items as $idx => $item) {
-            foreach ($voters as $i => $voter) {
-                $val = ($idx * 3 + $i) % 5 === 0 ? VoteValue::Down : VoteValue::Up;
+
+        // Vorschlag B: erst ein Teil hat abgestimmt, Linus ist beim Mehl dagegen.
+        foreach ($proposalB->items()->with('allocations')->get() as $index => $item) {
+            foreach ($item->stakeholderIds() as $voterId) {
+                if ($voterId === $aylin->id) {
+                    continue; // hat noch nicht abgestimmt
+                }
+
+                $blocks = $voterId === $linus->id && $item->product_id === $dinkelmehl->id;
+
                 ProposalVote::create([
                     'proposal_item_id' => $item->id,
-                    'user_id' => $voter->id,
-                    'value' => $val->value,
+                    'user_id' => $voterId,
+                    'value' => ($blocks ? VoteValue::Down : VoteValue::Up)->value,
+                    'reason' => $blocks ? 'Ein 50-kg-Sack Mehl ist für uns zu viel Lagerfläche.' : null,
                 ]);
             }
         }
 
         // Aktivitäten-Stream
         $active->logActivity('phase_changed', ['from' => 'negotiating', 'to' => 'finalizing']);
-        $active->logActivity('proposal_published', ['proposal_id' => $proposalA->id]);
-        $active->logActivity('proposal_published', ['proposal_id' => $proposalB->id]);
-        $proposalA->logActivity('created');
-        $proposalB->logActivity('created');
+        $active->logActivity('proposal_published', ['proposal_id' => $proposalA->id, 'title' => $proposalA->title]);
+        $active->logActivity('proposal_published', ['proposal_id' => $proposalB->id, 'title' => $proposalB->title]);
+        $proposalA->logActivity('created', ['title' => $proposalA->title]);
+        $proposalB->logActivity('created', ['title' => $proposalB->title]);
+
+        $announcement = app(DraftBuilder::class)->buildDraft($active, NotificationKind::ProposalReady, $marie);
+        $announcement->forceFill([
+            'sent_at' => Carbon::parse('2026-05-23 17:00'),
+            'sent_by_user_id' => $marie->id,
+            'recipient_count' => 6,
+        ])->save();
 
         // ---------------- Shopping-Runde (Sommer 2026, Phase shopping) ----------------
-        // Tobias ist Lead; alle anderen haben schon gefüllte Warenkörbe.
-        // Marie hat erst _ein_ Produkt drin — passt zur Aufgabenliste auf dem Dashboard.
+        // A group runs one round at a time — in Schöneberg that is the spring
+        // order, so this one belongs to Lichtenrade: Tobias leads, Kira has a
+        // full cart, Marie just _one_ product.
         $shopping = Round::create([
-            'group_id' => $schoeneberg->id,
+            'group_id' => $lichtenrade->id,
             'lead_user_id' => $tobias->id,
             'title' => 'Sommer-Bestellung 2026',
             'phase' => RoundPhase::Shopping,
@@ -559,7 +592,7 @@ class DemoSeeder extends Seeder
             'finalization_deadline' => '2026-07-01',
             'payment_deadline' => '2026-07-08',
             'expected_delivery' => '2026-07-22',
-            'pickup_location' => 'Hauptstraße 42, 10827 Berlin · Hinterhof, Keller links',
+            'pickup_location' => 'Hofgemeinschaft Lichtenrade · Scheune am Kirchhainer Damm',
             'max_participants' => 8,
             'lead_fee_percent' => 2.5,
             'platform_fee_percent' => 1.0,
@@ -567,41 +600,26 @@ class DemoSeeder extends Seeder
             'description' => 'Großeinkauf für Sommer + Spätsommer. Bitte bis zum 15.06. die Warenkörbe füllen, danach hole ich Hersteller-Preise ein.',
         ]);
 
-        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-23 18:00', 'location' => 'Speisekammer, Keller links']);
-        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-25 18:30', 'location' => 'Speisekammer, Keller links']);
+        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-23 18:00', 'location' => 'Scheune']);
+        PickupDate::create(['round_id' => $shopping->id, 'scheduled_at' => '2026-07-25 10:00', 'location' => 'Scheune']);
 
-        foreach ([$marie, $tobias, $sara, $linus, $aylin, $jonas] as $u) {
+        foreach ([$tobias, $kira, $marie] as $u) {
             RoundParticipant::create(['round_id' => $shopping->id, 'user_id' => $u->id]);
         }
 
-        // Marie: erst _ein_ Produkt → Aufgabe „Warenkorb füllen" bleibt sichtbar
         $this->cartExact($shopping, $marie, $dinkelmehl, 3);
 
-        // Andere haben bereits substanzielle Warenkörbe
         $this->cartExact($shopping, $tobias, $dinkelmehl, 8);
         $this->cartExact($shopping, $tobias, $reis, 15);
         $this->cartFlex($shopping, $tobias, $polenta, 5, 10);
         $this->cartExact($shopping, $tobias, $spirelli, 3);
         $this->cartExact($shopping, $tobias, $senf, 6);
 
-        $this->cartFlex($shopping, $sara, $dinkelmehl, 2, 6);
-        $this->cartExact($shopping, $sara, $hafer, 8);
-        $this->cartExact($shopping, $sara, $senf, 4);
-        $this->cartFlex($shopping, $sara, $spaghetti, 2, 5);
-
-        $this->cartFlex($shopping, $linus, $reis, 8, 20);
-        $this->cartExact($shopping, $linus, $spaghetti, 6);
-        $this->cartFlex($shopping, $linus, $hafer, 3, 8);
-        $this->cartExact($shopping, $linus, $polenta, 5);
-
-        $this->cartFlex($shopping, $aylin, $dinkelmehl, 3, 6);
-        $this->cartExact($shopping, $aylin, $senf, 3);
-        $this->cartFlex($shopping, $aylin, $spirelli, 2, 4);
-        $this->cartExact($shopping, $aylin, $reis, 5);
-
-        $this->cartFlex($shopping, $jonas, $reis, 4, 12);
-        $this->cartExact($shopping, $jonas, $polenta, 3);
-        $this->cartFlex($shopping, $jonas, $hafer, 2, 5);
+        $this->cartFlex($shopping, $kira, $dinkelmehl, 2, 6);
+        $this->cartFlex($shopping, $kira, $reis, 8, 20);
+        $this->cartExact($shopping, $kira, $hafer, 8);
+        $this->cartExact($shopping, $kira, $senf, 4);
+        $this->cartFlex($shopping, $kira, $spaghetti, 2, 5);
 
         $shopping->logActivity('phase_changed', ['from' => 'draft', 'to' => 'shopping']);
 
@@ -675,24 +693,44 @@ SVG;
         return $path;
     }
 
-    private function makeUser(string $first, string $last, string $email): User
+    private function makeUser(string $first, string $last, string $email, string $phone, string $postalCode, int $householdSize, ?string $nickname = null): User
     {
         return User::create([
             'first_name' => $first,
             'last_name' => $last,
+            'nickname' => $nickname,
             'name' => $first.' '.$last,
             'email' => $email,
+            'phone' => $phone,
+            'postal_code' => $postalCode,
+            'city' => 'Berlin',
+            'household_size' => $householdSize,
             'password' => Hash::make('password'),
             'email_verified_at' => now(),
             'remember_token' => Str::random(10),
         ]);
     }
 
+    /**
+     * Demo groups were founded when their first member joined — not when
+     * the seeder ran.
+     */
+    private function backdateFounding(Group $group): void
+    {
+        $foundedAt = Carbon::parse($group->members()->min('group_user.joined_at'));
+
+        $group->members()->updateExistingPivot($group->owner_id, ['joined_at' => $foundedAt]);
+        $group->activities()->where('action', 'created')->update(['created_at' => $foundedAt, 'updated_at' => $foundedAt]);
+    }
+
     private function attach(Group $group, User $user, GroupRole $role): void
     {
-        $group->members()->attach($user->id, [
-            'role' => $role->value,
-            'joined_at' => now()->subDays(rand(30, 360)),
+        // Owners are already members (see Group::ensureOwnerMembership()).
+        $group->members()->syncWithoutDetaching([
+            $user->id => [
+                'role' => $role->value,
+                'joined_at' => now()->subDays(rand(30, 360)),
+            ],
         ]);
     }
 
@@ -742,38 +780,17 @@ SVG;
             'published_at' => $publishedAt,
         ]);
 
-        $distributor = app(Distributor::class);
+        $builder = app(ProposalBuilder::class);
 
         foreach ($items as [$product, $tier]) {
             if (! $tier instanceof PriceTier) {
                 continue;
             }
-            $cartItems = $round->cartItems()->where('product_id', $product->id)->get();
-            if ($cartItems->isEmpty()) {
-                continue;
-            }
 
-            $result = $distributor->compute($cartItems, $tier);
-            if ($result->packagesOrdered <= 0) {
-                continue;
-            }
+            $cartItems = $round->cartItems()->with(['product', 'user'])->where('product_id', $product->id)->get();
 
-            $proposalItem = ProposalItem::create([
-                'proposal_id' => $proposal->id,
-                'product_id' => $product->id,
-                'price_tier_id' => $tier->id,
-                'packages_ordered' => $result->packagesOrdered,
-                'total_price_cents' => $result->totalPriceCents,
-                'notes' => $result->feasible ? null : implode("\n", $result->notes),
-            ]);
-
-            foreach ($result->allocations as $alloc) {
-                ProposalAllocation::create([
-                    'proposal_item_id' => $proposalItem->id,
-                    'user_id' => $alloc->userId,
-                    'quantity' => round($alloc->allocatedQuantity, 3),
-                    'share_cents' => $alloc->shareCents,
-                ]);
+            if ($cartItems->isNotEmpty()) {
+                $builder->createItem($proposal, $product, PackageSpec::fromTier($tier), $cartItems);
             }
         }
 

@@ -47,7 +47,7 @@ class CartItem extends Model
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(Product::class)->withTrashed();
     }
 
     public function preferredTier(): BelongsTo
@@ -71,11 +71,20 @@ class CartItem extends Model
 
     public function summary(): string
     {
+        $unit = $this->product?->unitLabel() ?? '';
+
         if ($this->quantity_mode === QuantityMode::Exact) {
-            return number_format((float) $this->exact_quantity, 2, ',', '.').' '.($this->product?->unit ?? '');
+            return static::formatQuantity((float) $this->exact_quantity).' '.$unit;
         }
 
-        return number_format((float) $this->min_quantity, 2, ',', '.').'–'.
-            number_format((float) $this->max_quantity, 2, ',', '.').' '.($this->product?->unit ?? '');
+        return static::formatQuantity((float) $this->min_quantity).'–'.static::formatQuantity((float) $this->max_quantity).' '.$unit;
+    }
+
+    /**
+     * German number format without superfluous decimals ("2,5" instead of "2,50").
+     */
+    public static function formatQuantity(float $quantity): string
+    {
+        return rtrim(rtrim(number_format($quantity, 3, ',', '.'), '0'), ',');
     }
 }

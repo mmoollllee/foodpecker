@@ -5,34 +5,29 @@ namespace App\Filament\Resources\Products;
 use App\Enums\PackagingStrategy;
 use App\Enums\ProductCategory;
 use App\Enums\Visibility;
+use App\Filament\Resources\Manufacturers\RelationManagers\ProductsRelationManager;
 use App\Filament\Resources\Products\Pages\ManageProducts;
-use App\Models\Manufacturer;
+use App\Filament\Resources\Products\Pages\ViewProduct;
+use App\Filament\Resources\Products\Schemas\ProductForm;
 use App\Models\Product;
 use BackedEnum;
-use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ForceDeleteAction;
+use Filament\Actions\RestoreAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Placeholder;
-use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
-use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
-use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\HtmlString;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class ProductResource extends Resource
 {
@@ -54,130 +49,7 @@ class ProductResource extends Resource
 
     public static function form(Schema $schema): Schema
     {
-        return $schema->components([
-            Section::make('Produkt')
-                ->schema([
-                    Select::make('manufacturer_id')
-                        ->label('Hersteller')
-                        ->options(fn () => Manufacturer::visibleTo(Filament::getTenant())->orderBy('name')->pluck('name', 'id'))
-                        ->searchable()
-                        ->preload()
-                        ->required(),
-                    TextInput::make('name')
-                        ->label('Produktname')
-                        ->required()
-                        ->maxLength(255),
-                    Select::make('unit')
-                        ->label('Einheit')
-                        ->options([
-                            'kg' => 'Kilogramm (kg)',
-                            'g' => 'Gramm (g)',
-                            'l' => 'Liter (l)',
-                            'ml' => 'Milliliter (ml)',
-                            'stk' => 'Stück',
-                            'glas' => 'Glas',
-                            'pkg' => 'Packung',
-                        ])
-                        ->default('kg')
-                        ->required(),
-                    Select::make('category')
-                        ->label('Kategorie')
-                        ->options(ProductCategory::class)
-                        ->searchable()
-                        ->helperText('Hilft beim Sortieren und Filtern, z. B. im Warenkorb-Modal.'),
-                    Select::make('packaging_strategy')
-                        ->label('Verpackungs-Logik')
-                        ->options(PackagingStrategy::class)
-                        ->default(PackagingStrategy::Tiered->value)
-                        ->required()
-                        ->helperText('Bestimmt, wie das Produkt aufgeteilt werden kann.')
-                        ->columnSpanFull(),
-                    Select::make('visibility')
-                        ->label('Sichtbarkeit')
-                        ->options(Visibility::class)
-                        ->default(Visibility::Private->value)
-                        ->required(),
-                    TextInput::make('estimated_price_cents')
-                        ->label('Geschätzter Preis (Cent)')
-                        ->numeric()
-                        ->suffix('Cent')
-                        ->helperText('z. B. 2499 = 24,99 € pro typisches Gebinde'),
-                ])->columns(3),
-
-            Section::make('Preisstaffeln / Gebindegrößen')
-                ->description('Eine Zeile pro verfügbarer Gebindegröße. Mengenstaffeln (Reis 10/25/50 kg), feste Größen (Dinkelmehl 25/50 kg), Paletten-Schritte (Senf 12er) oder Großgebinde (Spirelli 5 kg).')
-                ->schema([
-                    Repeater::make('priceTiers')
-                        ->relationship()
-                        ->hiddenLabel()
-                        ->orderColumn('sort_order')
-                        ->itemLabel(fn (array $state): ?string => $state['label'] ?? null)
-                        ->collapsible()
-                        ->cloneable()
-                        ->schema([
-                            TextInput::make('label')
-                                ->label('Label')
-                                ->placeholder('z. B. „25 kg Sack"')
-                                ->required()
-                                ->columnSpan(2),
-                            TextInput::make('package_amount')
-                                ->label('Gebinde-Menge')
-                                ->numeric()
-                                ->required()
-                                ->step(0.001)
-                                ->minValue(0.001)
-                                ->columnSpan(1),
-                            TextInput::make('price_cents')
-                                ->label('Preis')
-                                ->numeric()
-                                ->required()
-                                ->suffix('Cent')
-                                ->columnSpan(1),
-                            TextInput::make('min_order_packages')
-                                ->label('Min. Gebinde')
-                                ->numeric()
-                                ->default(1)
-                                ->columnSpan(1),
-                            Toggle::make('is_divisible')
-                                ->label('Innerhalb der Gruppe teilbar?')
-                                ->default(true)
-                                ->live()
-                                ->columnSpan(2)
-                                ->inline(false),
-                            TextInput::make('divisible_step')
-                                ->label('Teilschritt')
-                                ->numeric()
-                                ->step(0.001)
-                                ->placeholder('z. B. 0.5')
-                                ->visible(fn ($get) => $get('is_divisible'))
-                                ->columnSpan(2),
-                        ])
-                        ->columns(4)
-                        ->defaultItems(1)
-                        ->addActionLabel('Weitere Größe hinzufügen'),
-                ]),
-
-            Section::make('Beschreibung & Bild')
-                ->schema([
-                    Textarea::make('description')
-                        ->label('Beschreibung')
-                        ->placeholder('Worauf solltet ihr beim Bestellen achten? Geschmack, Anwendung, Besonderheiten…')
-                        ->rows(4)
-                        ->columnSpanFull(),
-                    FileUpload::make('image_path')
-                        ->label('Produktbild (optional)')
-                        ->image()
-                        ->disk('public')
-                        ->directory('products')
-                        ->visibility('public')
-                        ->imageEditor()
-                        ->imageCropAspectRatio('1:1')
-                        ->maxSize(5120)
-                        ->helperText('Quadrate funktionieren am besten. Wird in der Produkt-Karte rechts neben dem Hersteller angezeigt.'),
-                ])
-                ->collapsed()
-                ->collapsible(),
-        ]);
+        return ProductForm::configure($schema);
     }
 
     public static function table(Table $table): Table
@@ -189,7 +61,7 @@ class ProductResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->weight('semibold')
-                    ->description(fn (Product $r) => $r->manufacturer?->name),
+                    ->description(fn (Product $record, HasTable $livewire): ?string => $livewire instanceof ProductsRelationManager ? null : $record->manufacturer?->name),
                 TextColumn::make('category')
                     ->label('Kategorie')
                     ->badge()
@@ -197,6 +69,7 @@ class ProductResource extends Resource
                     ->toggleable(),
                 TextColumn::make('unit')
                     ->label('Einh.')
+                    ->formatStateUsing(fn (Product $record): string => $record->unitLabel())
                     ->color('gray'),
                 TextColumn::make('packaging_strategy')
                     ->label('Verpackung')
@@ -213,16 +86,17 @@ class ProductResource extends Resource
                     ->expandableLimitedList(),
                 TextColumn::make('estimated_price_cents')
                     ->label('Richtwert')
-                    ->state(fn (Product $r) => $r->formattedEstimatedPrice())
+                    ->state(fn (Product $record): ?string => $record->formattedEstimatedPrice())
                     ->sortable()
                     ->color('warning'),
                 TextColumn::make('group.name')
-                    ->label('Gruppe')
-                    ->placeholder('— öffentlich —')
+                    ->label('Gehört zu')
+                    ->placeholder('—')
                     ->color('gray')
                     ->toggleable(),
             ])
             ->defaultSort('name')
+            ->recordUrl(fn (Product $record): string => static::getUrl('view', ['record' => $record]))
             ->filters([
                 SelectFilter::make('category')
                     ->label('Kategorie')
@@ -238,34 +112,34 @@ class ProductResource extends Resource
                     ->label('Hersteller')
                     ->relationship('manufacturer', 'name')
                     ->searchable()
-                    ->preload(),
+                    ->preload()
+                    ->hiddenOn(ProductsRelationManager::class),
+                TrashedFilter::make()
+                    ->label('Archiv')
+                    ->placeholder('Ohne archivierte')
+                    ->trueLabel('Mit archivierten')
+                    ->falseLabel('Nur archivierte'),
             ])
             ->recordActions([
                 ViewAction::make()
                     ->label('Ansehen')
-                    ->modalHeading('Produkt')
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Schließen')
-                    ->modalWidth('lg')
-                    ->schema([
-                        Placeholder::make('product_card')
-                            ->hiddenLabel()
-                            ->content(fn (Product $record): Htmlable => new HtmlString(
-                                view('components.foodpecker.product-card', [
-                                    'product' => $record->loadMissing('manufacturer', 'priceTiers'),
-                                    'compact' => false,
-                                    'showDescription' => true,
-                                    'showPricing' => true,
-                                ])->render()
-                            )),
-                    ]),
-                EditAction::make()->label('Bearbeiten')->modalWidth('6xl'),
-                DeleteAction::make()->label('Löschen'),
-            ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
+                    ->url(fn (Product $record): string => static::getUrl('view', ['record' => $record])),
+                EditAction::make()
+                    ->label('Bearbeiten')
+                    ->modalWidth('6xl')
+                    ->mutateDataUsing(fn (array $data, Product $record): array => ProductForm::prepareForSave($data, $record->group_id)),
+                DeleteAction::make()
+                    ->label('Archivieren')
+                    ->icon(Heroicon::OutlinedArchiveBox)
+                    ->modalHeading('Produkt archivieren?')
+                    ->modalDescription('Archivierte Produkte tauchen in neuen Runden nicht mehr auf. Bestehende Warenkörbe, Vorschläge und die Preis-Historie bleiben erhalten.')
+                    ->modalSubmitActionLabel('Archivieren')
+                    ->successNotificationTitle('Produkt archiviert'),
+                RestoreAction::make()
+                    ->label('Wiederherstellen'),
+                ForceDeleteAction::make()
+                    ->label('Endgültig löschen')
+                    ->modalDescription('Nur möglich, solange das Produkt nie bestellt wurde.'),
             ])
             ->emptyStateHeading('Noch keine Produkte')
             ->emptyStateDescription('Lege zuerst Hersteller an, dann die zugehörigen Produkte mit ihren Preisstaffeln.');
@@ -278,17 +152,12 @@ class ProductResource extends Resource
             ->with('manufacturer', 'priceTiers');
     }
 
-    public static function mutateFormDataBeforeCreate(array $data): array
+    /**
+     * Archived products stay viewable, e.g. from an old order.
+     */
+    public static function getRecordRouteBindingEloquentQuery(): Builder
     {
-        $tenant = Filament::getTenant();
-        $data['created_by_user_id'] = auth()->id();
-        if (($data['visibility'] ?? Visibility::Private->value) === Visibility::Public->value) {
-            $data['group_id'] = null;
-        } else {
-            $data['group_id'] = $tenant?->id;
-        }
-
-        return $data;
+        return parent::getRecordRouteBindingEloquentQuery()->withoutGlobalScopes([SoftDeletingScope::class]);
     }
 
     public static function getRecordTitle(?Model $record): ?string
@@ -300,6 +169,7 @@ class ProductResource extends Resource
     {
         return [
             'index' => ManageProducts::route('/'),
+            'view' => ViewProduct::route('/{record}'),
         ];
     }
 }

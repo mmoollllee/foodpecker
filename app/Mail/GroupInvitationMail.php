@@ -18,14 +18,14 @@ class GroupInvitationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '🪶 Einladung zur Gruppe "'.$this->invitation->group->name.'" bei Foodpecker',
+            subject: '🪶 Einladung zur Gruppe „'.$this->invitation->group->name.'“ bei Foodpecker',
         );
     }
 
     public function content(): Content
     {
         return new Content(
-            view: 'mail.group-invitation',
+            markdown: 'mail.group-invitation',
             with: [
                 'invitation' => $this->invitation,
                 'group' => $this->invitation->group,

@@ -24,6 +24,11 @@ use Illuminate\Support\Collection;
  *       Jede:r Teilnehmer:in bekommt ganzzahlige Gebinde im Rahmen der eigenen
  *       Min/Max-Spanne. Auffüllung greedy nach größtem freien Wunsch.
  *
+ * The lead may override the number of packages (e.g. after negotiating) and
+ * the package price. Quantity that nobody wants within their maximum stays
+ * unallocated and is reported as leftover; its cost is shared in proportion
+ * to the allocated quantities.
+ *
  * Der Algorithmus ist deterministisch und nachvollziehbar — nicht optimal,
  * aber für reale Gruppen-Bestellungen brauchbar und vom Lead jederzeit
  * hand-editierbar.
@@ -34,28 +39,31 @@ class Distributor
 
     /**
      * @param  Collection<int, CartItem>  $cartItems
+     * @param  int|null  $packages  Number of packages to order instead of the computed minimum.
      */
-    public function compute(Collection $cartItems, PriceTier $tier): DistributionResult
+    public function compute(Collection $cartItems, PriceTier|PackageSpec $package, ?int $packages = null): DistributionResult
     {
-        $notes = [];
+        $spec = $package instanceof PriceTier ? PackageSpec::fromTier($package) : $package;
 
         if ($cartItems->isEmpty()) {
             return new DistributionResult(0, 0.0, 0, [], true, ['Keine Warenkorb-Einträge.']);
         }
 
-        return $tier->is_divisible
-            ? $this->distributeDivisible($cartItems, $tier, $notes)
-            : $this->distributeIndivisible($cartItems, $tier, $notes);
+        $unit = $cartItems->first()?->product?->unitLabel() ?? '';
+
+        return $spec->isDivisible
+            ? $this->distributeDivisible($cartItems, $spec, $packages, $unit)
+            : $this->distributeIndivisible($cartItems, $spec, $packages, $unit);
     }
 
     /**
      * @param  Collection<int, CartItem>  $items
-     * @param  array<int, string>  $notes
      */
-    private function distributeDivisible(Collection $items, PriceTier $tier, array $notes): DistributionResult
+    private function distributeDivisible(Collection $items, PackageSpec $spec, ?int $packagesOverride, string $unit): DistributionResult
     {
-        $packageAmount = (float) $tier->package_amount;
-        $step = (float) ($tier->divisible_step ?? $packageAmount);
+        $notes = [];
+        $packageAmount = $spec->packageAmount;
+        $step = $spec->step();
 
         /** @var array<int, AllocationLine> $lines */
         $lines = [];
@@ -65,104 +73,54 @@ class Distributor
         foreach ($items as $item) {
             $min = $item->effectiveMin();
             $max = $item->effectiveMax();
-            $line = new AllocationLine(
+            $lines[] = new AllocationLine(
                 userId: $item->user_id,
                 cartItem: $item,
                 requestedMin: $min,
                 requestedMax: $max,
-                allocatedQuantity: $min,
+                allocatedQuantity: 0.0,
             );
-            $lines[] = $line;
             $sumMin += $min;
             $sumMax += $max;
         }
 
-        // Zielmenge = kleinstes Vielfaches der Gebindegröße >= sumMin
-        $packages = max((int) $tier->min_order_packages, (int) ceil($sumMin / $packageAmount - self::EPSILON));
+        $packages = $packagesOverride
+            ?? max($spec->minOrderPackages, (int) ceil($sumMin / $packageAmount - self::EPSILON));
+        $packages = max(0, $packages);
         $target = $packages * $packageAmount;
 
-        $feasible = $target <= $sumMax + self::EPSILON;
-
-        if (! $feasible) {
+        if ($target + self::EPSILON >= $sumMin) {
+            $this->fillUpToTarget($lines, $target, $sumMin, $step);
+        } else {
+            $this->shrinkToTarget($lines, $target, $sumMin, $step);
             $notes[] = sprintf(
-                'Verteilung überschreitet die Maximal-Wünsche um %s %s.',
-                number_format($target - $sumMax, 3, ',', '.'),
-                $tier->product?->unit ?? '',
+                'Es fehlen %s %s zu den Mindestwünschen.',
+                $this->formatQuantity($sumMin - $target),
+                $unit,
             );
         }
 
-        // Slack pro Item
-        $slack = [];
-        $totalSlack = 0.0;
-        foreach ($lines as $i => $l) {
-            $slack[$i] = max(0.0, $l->requestedMax - $l->allocatedQuantity);
-            $totalSlack += $slack[$i];
+        $allocated = array_sum(array_map(fn (AllocationLine $line): float => $line->allocatedQuantity, $lines));
+        $leftover = max(0.0, $target - $allocated);
+
+        if ($leftover > self::EPSILON) {
+            $notes[] = sprintf(
+                '%s %s bleiben übrig, weil niemand mehr möchte — sie werden anteilig mitbezahlt.',
+                $this->formatQuantity($leftover),
+                $unit,
+            );
         }
 
-        $remaining = $target - $sumMin;
-
-        if ($remaining > self::EPSILON && $totalSlack > self::EPSILON) {
-            // 1) proportional snappen
-            foreach ($lines as $i => $l) {
-                if ($slack[$i] <= 0.0) {
-                    continue;
-                }
-                $proportional = ($slack[$i] / $totalSlack) * $remaining;
-                $snapped = floor(($proportional + self::EPSILON) / $step) * $step;
-                $snapped = min($snapped, $slack[$i]);
-                $l->allocatedQuantity += $snapped;
-                $remaining -= $snapped;
-                $slack[$i] -= $snapped;
-            }
-
-            // 2) Rundungs-Rest auf die mit dem größten freien Slack legen
-            while ($remaining > self::EPSILON) {
-                $bestIdx = null;
-                $bestSlack = 0.0;
-                foreach ($lines as $i => $l) {
-                    if ($slack[$i] >= $step - self::EPSILON && $slack[$i] > $bestSlack) {
-                        $bestIdx = $i;
-                        $bestSlack = $slack[$i];
-                    }
-                }
-                if ($bestIdx === null) {
-                    break;
-                }
-                $lines[$bestIdx]->allocatedQuantity += $step;
-                $slack[$bestIdx] -= $step;
-                $remaining -= $step;
-            }
-
-            // 3) Wenn immer noch Rest übrig: an die mit dem größten Slack drücken (Infeasible)
-            if ($remaining > self::EPSILON) {
-                $bestIdx = 0;
-                foreach ($lines as $i => $l) {
-                    if ($l->requestedMax - $l->allocatedQuantity > $lines[$bestIdx]->requestedMax - $lines[$bestIdx]->allocatedQuantity) {
-                        $bestIdx = $i;
-                    }
-                }
-                $lines[$bestIdx]->allocatedQuantity += $remaining;
-                $lines[$bestIdx]->unfulfilled = $lines[$bestIdx]->allocatedQuantity > $lines[$bestIdx]->requestedMax + self::EPSILON;
-                $remaining = 0.0;
-            }
+        foreach ($lines as $line) {
+            $line->unfulfilled = $line->allocatedQuantity < $line->requestedMin - self::EPSILON
+                || $line->allocatedQuantity > $line->requestedMax + self::EPSILON;
         }
 
-        $totalPriceCents = $packages * (int) $tier->price_cents;
-        $totalAllocated = array_sum(array_map(fn (AllocationLine $l) => $l->allocatedQuantity, $lines));
+        $totalPriceCents = $packages * $spec->priceCents;
+        $this->assignShares($lines, $totalPriceCents);
 
-        // Preis-Anteile pro Linie
-        if ($totalAllocated > self::EPSILON) {
-            $assignedSum = 0;
-            $lastIdx = count($lines) - 1;
-            foreach ($lines as $i => $l) {
-                if ($i === $lastIdx) {
-                    $l->shareCents = $totalPriceCents - $assignedSum;
-                } else {
-                    $l->shareCents = (int) round(($l->allocatedQuantity / $totalAllocated) * $totalPriceCents);
-                    $assignedSum += $l->shareCents;
-                }
-            }
-        }
+        $feasible = $leftover <= self::EPSILON
+            && collect($lines)->every(fn (AllocationLine $line): bool => ! $line->unfulfilled);
 
         return new DistributionResult(
             packagesOrdered: $packages,
@@ -171,98 +129,224 @@ class Distributor
             allocations: $lines,
             feasible: $feasible,
             notes: $notes,
+            unallocatedQuantity: $leftover,
         );
     }
 
     /**
-     * @param  Collection<int, CartItem>  $items
-     * @param  array<int, string>  $notes
+     * Everybody gets their minimum; the rest is spread in proportion to the
+     * remaining flexibility, snapped to the divisible step.
+     *
+     * @param  array<int, AllocationLine>  $lines
      */
-    private function distributeIndivisible(Collection $items, PriceTier $tier, array $notes): DistributionResult
+    private function fillUpToTarget(array $lines, float $target, float $sumMin, float $step): void
     {
-        $packageAmount = (float) $tier->package_amount;
-        $perItem = [];
+        $slack = [];
+        $totalSlack = 0.0;
+
+        foreach ($lines as $i => $line) {
+            $line->allocatedQuantity = $line->requestedMin;
+            $slack[$i] = max(0.0, $line->requestedMax - $line->requestedMin);
+            $totalSlack += $slack[$i];
+        }
+
+        $remaining = $target - $sumMin;
+
+        if ($remaining <= self::EPSILON || $totalSlack <= self::EPSILON) {
+            return;
+        }
+
+        foreach ($lines as $i => $line) {
+            if ($slack[$i] <= 0.0) {
+                continue;
+            }
+
+            $proportional = min($slack[$i], ($slack[$i] / $totalSlack) * min($remaining, $totalSlack));
+            $snapped = min(floor(($proportional + self::EPSILON) / $step) * $step, $slack[$i]);
+            $line->allocatedQuantity += $snapped;
+            $slack[$i] -= $snapped;
+        }
+
+        $remaining = $target - array_sum(array_map(fn (AllocationLine $line): float => $line->allocatedQuantity, $lines));
+
+        while ($remaining > self::EPSILON) {
+            $bestIndex = null;
+            $bestSlack = 0.0;
+
+            foreach ($lines as $i => $line) {
+                if ($slack[$i] >= min($step, $remaining) - self::EPSILON && $slack[$i] > $bestSlack) {
+                    $bestIndex = $i;
+                    $bestSlack = $slack[$i];
+                }
+            }
+
+            if ($bestIndex === null) {
+                break;
+            }
+
+            $portion = min($step, $remaining, $slack[$bestIndex]);
+            $lines[$bestIndex]->allocatedQuantity += $portion;
+            $slack[$bestIndex] -= $portion;
+            $remaining -= $portion;
+        }
+    }
+
+    /**
+     * Fewer packages than the minimum wishes: everybody is cut in proportion
+     * to their minimum, snapped to the divisible step.
+     *
+     * @param  array<int, AllocationLine>  $lines
+     */
+    private function shrinkToTarget(array $lines, float $target, float $sumMin, float $step): void
+    {
+        $factor = $sumMin > 0 ? $target / $sumMin : 0.0;
+
+        foreach ($lines as $line) {
+            $line->allocatedQuantity = floor(($line->requestedMin * $factor + self::EPSILON) / $step) * $step;
+        }
+
+        $remaining = $target - array_sum(array_map(fn (AllocationLine $line): float => $line->allocatedQuantity, $lines));
+
+        while ($remaining > self::EPSILON) {
+            $bestIndex = null;
+            $bestShortfall = 0.0;
+
+            foreach ($lines as $i => $line) {
+                $shortfall = $line->requestedMin - $line->allocatedQuantity;
+                if ($shortfall > $bestShortfall + self::EPSILON) {
+                    $bestIndex = $i;
+                    $bestShortfall = $shortfall;
+                }
+            }
+
+            if ($bestIndex === null) {
+                break;
+            }
+
+            $portion = min($step, $remaining, $bestShortfall);
+            $lines[$bestIndex]->allocatedQuantity += $portion;
+            $remaining -= $portion;
+        }
+    }
+
+    /**
+     * @param  Collection<int, CartItem>  $items
+     */
+    private function distributeIndivisible(Collection $items, PackageSpec $spec, ?int $packagesOverride, string $unit): DistributionResult
+    {
+        $notes = [];
+        $packageAmount = $spec->packageAmount;
+        $rows = [];
 
         foreach ($items as $item) {
             $min = $item->effectiveMin();
             $max = $item->effectiveMax();
 
-            $minPkg = (int) ceil($min / $packageAmount - self::EPSILON);
-            $maxPkg = (int) floor($max / $packageAmount + self::EPSILON);
+            $minPackages = (int) ceil($min / $packageAmount - self::EPSILON);
+            $maxPackages = (int) floor($max / $packageAmount + self::EPSILON);
 
             if ($item->quantity_mode === QuantityMode::Exact) {
-                $maxPkg = $minPkg;
+                $maxPackages = $minPackages;
             }
 
-            if ($maxPkg < $minPkg) {
-                $maxPkg = $minPkg;
-                $notes[] = sprintf('Anpassung für User #%d: Mindestmenge erfordert mehr als Maximum.', $item->user_id);
+            if ($maxPackages < $minPackages) {
+                $maxPackages = $minPackages;
+                $notes[] = sprintf(
+                    '%s: Wunschmenge passt nicht genau in ganze Packungen, es wird aufgerundet.',
+                    $item->user?->first_name ?? 'Teilnehmer #'.$item->user_id,
+                );
             }
 
-            $perItem[] = [
+            $rows[] = [
                 'item' => $item,
-                'minPkg' => $minPkg,
-                'maxPkg' => $maxPkg,
-                'pkg' => $minPkg,
+                'minPackages' => $minPackages,
+                'maxPackages' => $maxPackages,
+                'packages' => $minPackages,
             ];
         }
 
-        $packages = array_sum(array_column($perItem, 'pkg'));
-        $minPackages = max((int) $tier->min_order_packages, 0);
+        $assigned = array_sum(array_column($rows, 'packages'));
+        $target = max(0, $packagesOverride ?? max($assigned, $spec->minOrderPackages));
 
-        // Auf Mindestmenge auffüllen, indem flexible Teilnehmer mehr nehmen
-        while ($packages < $minPackages) {
+        while ($assigned < $target) {
             $candidate = null;
             $candidateSlack = 0;
-            foreach ($perItem as $idx => $row) {
-                $slack = $row['maxPkg'] - $row['pkg'];
+
+            foreach ($rows as $index => $row) {
+                $slack = $row['maxPackages'] - $row['packages'];
                 if ($slack > $candidateSlack) {
-                    $candidate = $idx;
+                    $candidate = $index;
                     $candidateSlack = $slack;
                 }
             }
+
             if ($candidate === null) {
-                $notes[] = 'Mindestbestellmenge konnte nicht erreicht werden.';
                 break;
             }
-            $perItem[$candidate]['pkg']++;
-            $packages++;
+
+            $rows[$candidate]['packages']++;
+            $assigned++;
+        }
+
+        while ($assigned > $target) {
+            $candidate = null;
+            $candidateScore = null;
+
+            foreach ($rows as $index => $row) {
+                if ($row['packages'] <= 0) {
+                    continue;
+                }
+
+                // Prefer taking packages from flexible people above their minimum.
+                $score = [($row['packages'] > $row['minPackages']) ? 1 : 0, $row['packages']];
+                if ($candidateScore === null || $score > $candidateScore) {
+                    $candidate = $index;
+                    $candidateScore = $score;
+                }
+            }
+
+            if ($candidate === null) {
+                break;
+            }
+
+            $rows[$candidate]['packages']--;
+            $assigned--;
+        }
+
+        $packages = max($target, $assigned);
+        $leftoverPackages = $packages - $assigned;
+
+        if ($leftoverPackages > 0) {
+            $notes[] = sprintf(
+                '%d Packung(en) bleiben übrig, weil niemand mehr möchte — sie werden anteilig mitbezahlt.',
+                $leftoverPackages,
+            );
         }
 
         $lines = [];
-        $totalAllocated = 0.0;
-        foreach ($perItem as $row) {
+        foreach ($rows as $row) {
             /** @var CartItem $item */
             $item = $row['item'];
-            $qty = $row['pkg'] * $packageAmount;
-            $totalAllocated += $qty;
 
             $lines[] = new AllocationLine(
                 userId: $item->user_id,
                 cartItem: $item,
                 requestedMin: $item->effectiveMin(),
                 requestedMax: $item->effectiveMax(),
-                allocatedQuantity: $qty,
-                unfulfilled: $row['pkg'] < $row['minPkg'] || $row['pkg'] > $row['maxPkg'],
+                allocatedQuantity: $row['packages'] * $packageAmount,
+                unfulfilled: $row['packages'] < $row['minPackages'] || $row['packages'] > $row['maxPackages'],
             );
         }
 
-        $totalPriceCents = $packages * (int) $tier->price_cents;
-
-        if ($packages > 0) {
-            $assignedSum = 0;
-            $lastIdx = count($lines) - 1;
-            foreach ($lines as $i => $l) {
-                if ($i === $lastIdx) {
-                    $l->shareCents = $totalPriceCents - $assignedSum;
-                } else {
-                    $l->shareCents = (int) round(($l->allocatedQuantity / $totalAllocated) * $totalPriceCents);
-                    $assignedSum += $l->shareCents;
-                }
-            }
+        if (collect($lines)->contains(fn (AllocationLine $line): bool => $line->allocatedQuantity < $line->requestedMin - self::EPSILON)) {
+            $notes[] = sprintf('Nicht alle Mindestwünsche passen in %d Packung(en).', $packages);
         }
 
-        $feasible = collect($lines)->every(fn (AllocationLine $l) => ! $l->unfulfilled);
+        $totalPriceCents = $packages * $spec->priceCents;
+        $this->assignShares($lines, $totalPriceCents);
+
+        $feasible = $leftoverPackages === 0
+            && collect($lines)->every(fn (AllocationLine $line): bool => ! $line->unfulfilled);
 
         return new DistributionResult(
             packagesOrdered: $packages,
@@ -271,6 +355,39 @@ class Distributor
             allocations: $lines,
             feasible: $feasible,
             notes: $notes,
+            unallocatedQuantity: $leftoverPackages * $packageAmount,
         );
+    }
+
+    /**
+     * Splits the total price in proportion to the allocated quantities,
+     * exact to the cent (the last line absorbs rounding differences).
+     *
+     * @param  array<int, AllocationLine>  $lines
+     */
+    private function assignShares(array $lines, int $totalPriceCents): void
+    {
+        $totalAllocated = array_sum(array_map(fn (AllocationLine $line): float => $line->allocatedQuantity, $lines));
+
+        if ($totalAllocated <= self::EPSILON || $lines === []) {
+            return;
+        }
+
+        $assignedSum = 0;
+        $lastIndex = array_key_last($lines);
+
+        foreach ($lines as $i => $line) {
+            if ($i === $lastIndex) {
+                $line->shareCents = $totalPriceCents - $assignedSum;
+            } else {
+                $line->shareCents = (int) round(($line->allocatedQuantity / $totalAllocated) * $totalPriceCents);
+                $assignedSum += $line->shareCents;
+            }
+        }
+    }
+
+    private function formatQuantity(float $quantity): string
+    {
+        return rtrim(rtrim(number_format($quantity, 3, ',', '.'), '0'), ',');
     }
 }
