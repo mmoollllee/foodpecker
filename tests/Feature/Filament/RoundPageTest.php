@@ -227,13 +227,43 @@ it('shows what matters in the running phase and lets people look at the others',
         ->assertSee('erledigt');
 });
 
-it('offers moving on only in the panel of the running phase', function () {
+it('always offers moving on at the top of the phases, whichever phase is open', function () {
     actingInGroup($this->lead, $this->group);
 
     Livewire::test(ViewRound::class, ['record' => $this->round->id])
-        ->assertSee('Weiter zu: Bestätigung')
+        ->assertSeeInOrder(['Ablauf', 'Weiter zu: Bestätigung', 'Verhandlung'])
         ->set('selectedPhase', RoundPhase::Shopping->value)
-        ->assertDontSee('Weiter zu: Bestätigung');
+        ->assertSee('Weiter zu: Bestätigung');
+
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertDontSee('Weiter zu:');
+});
+
+it('shows your own cart column even before your first order', function () {
+    $this->round->update(['phase' => RoundPhase::Shopping]);
+    $newcomer = User::factory()->create();
+    $this->group->members()->attach($newcomer->id, ['role' => 'participant', 'joined_at' => now()]);
+    $cell = ['product' => $this->rice->id, 'user' => $newcomer->id];
+
+    actingInGroup($newcomer, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSee($this->rice->name.' für '.$newcomer->first_name.' hinzufügen')
+        ->callAction(TestAction::make('editCartItem')->arguments($cell), data: ['quantity_mode' => 'exact', 'exact_quantity' => 3])
+        ->assertHasNoActionErrors();
+
+    expect($this->round->fresh()->participantFor($newcomer))->not->toBeNull()
+        ->and((float) CartItem::where('round_id', $this->round->id)->where('user_id', $newcomer->id)->value('exact_quantity'))->toBe(3.0);
+});
+
+it('lets proposals be collapsed', function () {
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSeeHtml('fi-collapsible')
+        ->assertSeeHtml('proposal-'.$this->proposal->id);
 });
 
 it('ignores a phase that has no panel', function () {

@@ -35,6 +35,9 @@
 <x-filament::section
     :heading="$proposal->title"
     :description="'Vorgeschlagen von '.($proposal->proposedBy?->fullName() ?? '—').($proposal->published_at ? ' · freigegeben '.$proposal->published_at->diffForHumans() : '')"
+    collapsible
+    persist-collapsed
+    :collapse-id="'proposal-'.$proposal->id"
 >
     <x-slot name="afterHeader">
         <div class="flex items-center gap-3">

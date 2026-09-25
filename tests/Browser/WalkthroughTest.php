@@ -142,7 +142,7 @@ it('opens the running round with its phases, proposals and overview', function (
         ->screenshot(fullPage: false, filename: '09-round-detail-proposals');
 });
 
-it('opens the add item modal from the panel of the shopping phase', function () {
+it('adds a product nobody ordered yet from below the carts table', function () {
     $this->actingAs($this->marie);
 
     $activeRoundId = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail()->id;
@@ -154,7 +154,7 @@ it('opens the add item modal from the panel of the shopping phase', function () 
 
     $page = visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}")
         ->wait(1)
-        ->press('Artikel hinzufügen')
+        ->press('Produkt hinzufügen')
         ->wait(1)
         ->assertSee('Für wen?')
         ->assertSee('Produkt')

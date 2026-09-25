@@ -15,13 +15,6 @@
         </x-foodpecker.fact>
     </x-slot>
 
-    <x-slot name="actions">
-        <x-foodpecker.action :action="$this->addCartItemAction" />
-        @if ($phase === $round->phase)
-            <x-foodpecker.action :action="$this->nextPhaseAction" />
-        @endif
-    </x-slot>
-
     <x-slot name="details">
         @include('filament.rounds.partials.carts-table', ['round' => $round])
     </x-slot>

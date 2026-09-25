@@ -12,9 +12,6 @@
 
     <x-slot name="actions">
         <x-foodpecker.action :action="$this->createProposalAction" />
-        @if ($phase === $round->phase)
-            <x-foodpecker.action :action="$this->nextPhaseAction" />
-        @endif
     </x-slot>
 
     <x-slot name="details">

@@ -557,11 +557,13 @@ an einer Stelle:
   (`?phase=payment`, auch vom Dashboard aus). Darunter steht alles, was in der
   gewählten Phase passiert, samt Aktionen (`resources/views/filament/rounds/phases/`):
   Einkauf die Warenkörbe — ein Klick auf eine Menge ändert sie, die eigene
-  immer, als Lead auch die der anderen (`editCartItem`) —, Verhandlung und
+  immer, als Lead auch die der anderen (`editCartItem`); die eigene Spalte
+  steht schon vor der ersten Bestellung da, Produkte ohne Zeile kommen über
+  „Produkt hinzufügen“ unter der Tabelle dazu —, Verhandlung und
   Bestätigung die Vorschläge, Zahlung die Zahlungen, Bestellung die
   Bestellliste je Hersteller mit vorformulierter Mail, Abholung Abholort,
-  Termine und wer schon abgeholt hat. „Weiter zu …“ steht nur in der
-  laufenden Phase.
+  Termine und wer schon abgeholt hat. „Weiter zu …“ (bei Entwürfen
+  „Bestellrunde starten“) steht immer oben rechts im Ablauf.
 - **Verlauf & Benachrichtigungen**: eine Zeitleiste aus dem Aktivitäten-Stream
   und den verschickten Benachrichtigungen (Text aufklappbar); darüber sieht
   der Lead unversendete Entwürfe und erzeugt neue.
@@ -569,7 +571,8 @@ an einer Stelle:
   Vereinsbeitrag), Teilnehmer (mit Ausschlüssen und „Wieder aufnehmen“),
   Notizen und Dokumente.
 
-Jeder Vorschlag ist eine Tabelle (`partials/proposal.blade.php`): Positionen
+Jeder Vorschlag ist eine auf- und zuklappbare Tabelle (`partials/proposal.blade.php`,
+der Zustand bleibt im Browser gespeichert): Positionen
 als Zeilen, eine Spalte pro Person — die eigene zuerst, mit den
 Abstimm-Buttons —, darunter Versand, Beiträge und Summe pro Person. Die
 Begründung eines 👎 zeigt ein Tooltip am Daumen.

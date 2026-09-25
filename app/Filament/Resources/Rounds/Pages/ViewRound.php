@@ -106,15 +106,14 @@ class ViewRound extends ViewRecord
     }
 
     /**
-     * Actions that belong to a phase — adding to the cart, creating a
-     * proposal, moving on — sit in that phase's panel, not up here.
+     * Starting the round and moving on sit at the top right of the phases,
+     * everything else that belongs to a phase in its panel.
      */
     protected function getHeaderActions(): array
     {
         return [
             $this->acceptLeadHandoverAction(),
             $this->declineLeadHandoverAction(),
-            $this->startRoundAction(),
             $this->editRoundAction(),
             ActionGroup::make([
                 $this->requestLeadHandoverAction(),

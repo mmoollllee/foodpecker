@@ -1,16 +1,21 @@
 @php
     use App\Enums\QuantityMode;
     use App\Models\CartItem;
+    use App\Models\RoundParticipant;
 
     /** @var \App\Models\Round $round */
     $currentUserId = $this->currentUser()->id;
     $excludedIds = $round->participants->where('removed', true)->pluck('user_id')->map(fn ($userId): int => (int) $userId)->all();
 
-    // One column per person taking part: you first, then everybody else.
+    // One column per person taking part: you first — even before your first order — then everybody else.
     $columns = $round->participants
         ->where('removed', false)
         ->sortBy(fn ($participant) => [(int) $participant->user_id !== $currentUserId, $participant->user?->first_name])
         ->values();
+
+    if (! $columns->contains(fn ($participant): bool => (int) $participant->user_id === $currentUserId) && $this->canEditCartOf($this->currentUser())) {
+        $columns->prepend((new RoundParticipant(['user_id' => $currentUserId]))->setRelation('user', $this->currentUser()));
+    }
     $canEdit = $columns->mapWithKeys(fn ($participant): array => [(int) $participant->user_id => $this->canEditCartOf($participant->user)]);
 
     $itemsByProduct = $round->cartItems
@@ -26,7 +31,7 @@
 
 @if ($itemsByProduct->isEmpty())
     <p class="mt-4 text-sm text-gray-500">Noch nichts in den Warenkörben.</p>
-@else
+@elseif ($columns->isNotEmpty())
     <div class="mt-4 overflow-x-auto">
         <table class="w-full text-sm">
             <thead class="border-b border-gray-200 dark:border-white/10">
@@ -99,6 +104,10 @@
         </table>
     </div>
 @endif
+
+<div class="mt-3 [&:not(:has(*))]:hidden">
+    <x-foodpecker.action :action="$this->addCartItemAction" />
+</div>
 
 @if ($excludedIds !== [])
     <p class="mt-3 text-xs text-gray-500">Warenkörbe ausgeschlossener Teilnehmer zählen nicht mehr.</p>

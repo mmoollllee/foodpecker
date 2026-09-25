@@ -8,6 +8,10 @@
 
 <x-filament::section heading="Ablauf">
     <x-slot name="description">Klick auf eine Phase: Dort findest du alles, was in ihr passiert.</x-slot>
+    <x-slot name="afterHeader">
+        <x-foodpecker.action :action="$this->startRoundAction" />
+        <x-foodpecker.action :action="$this->nextPhaseAction" />
+    </x-slot>
 
     @if ($round->phase === RoundPhase::Draft)
         <div class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300">

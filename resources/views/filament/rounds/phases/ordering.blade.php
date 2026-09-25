@@ -13,12 +13,6 @@
 <x-foodpecker.phase-panel :round="$round" :phase="$phase">
     Alle haben bezahlt — jetzt bestellt der Lead bei den Herstellern. Die Mail an jeden Hersteller ist vorformuliert.
 
-    <x-slot name="actions">
-        @if ($phase === $round->phase)
-            <x-foodpecker.action :action="$this->nextPhaseAction" />
-        @endif
-    </x-slot>
-
     <x-slot name="details">
         @if ($itemsByManufacturer->isEmpty())
             <p class="mt-4 text-sm text-gray-500">Was bestellt wird, steht fest, sobald ein Vorschlag als finale Bestellung gewählt ist.</p>

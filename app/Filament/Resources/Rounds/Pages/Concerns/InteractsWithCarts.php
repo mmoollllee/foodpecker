@@ -22,12 +22,17 @@ use Filament\Support\Icons\Heroicon;
  */
 trait InteractsWithCarts
 {
+    /**
+     * Adds a product nobody has in the cart yet — everything else is a
+     * click into the carts table.
+     */
     public function addCartItemAction(): Action
     {
         return Action::make('addCartItem')
-            ->label('Artikel hinzufügen')
-            ->icon(Heroicon::OutlinedShoppingCart)
-            ->color('primary')
+            ->label('Produkt hinzufügen')
+            ->icon(Heroicon::Plus)
+            ->color('gray')
+            ->link()
             ->visible(fn (): bool => $this->getRound()->phase === RoundPhase::Shopping
                 && ($this->canManage() || $this->currentUser()->can('shop', $this->getRound())))
             ->fillForm(fn (): array => [
@@ -155,13 +160,19 @@ trait InteractsWithCarts
     }
 
     /**
-     * Only people taking part in the round have a column in the carts table.
+     * Whose cart a cell belongs to: somebody taking part in the round, or
+     * you before your first order.
      *
      * @param  array<string, mixed>  $arguments
      */
     protected function cartOwnerFromArguments(array $arguments): ?User
     {
-        $participant = $this->getRound()->participants->firstWhere('user_id', (int) ($arguments['user'] ?? 0));
+        $userId = (int) ($arguments['user'] ?? 0);
+        $participant = $this->getRound()->participants->firstWhere('user_id', $userId);
+
+        if ($participant === null && $userId === $this->currentUser()->id) {
+            return $this->currentUser();
+        }
 
         return $participant?->removed ? null : $participant?->user;
     }

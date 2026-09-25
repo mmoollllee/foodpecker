@@ -12,12 +12,6 @@
         </x-foodpecker.fact>
     </x-slot>
 
-    <x-slot name="actions">
-        @if ($phase === $round->phase)
-            <x-foodpecker.action :action="$this->nextPhaseAction" />
-        @endif
-    </x-slot>
-
     <x-slot name="details">
         @include('filament.rounds.partials.pickups', ['round' => $round])
     </x-slot>
