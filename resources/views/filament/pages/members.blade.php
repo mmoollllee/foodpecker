@@ -69,7 +69,9 @@
                             </td>
                             <td class="px-3 py-2">
                                 @if ($role instanceof GroupRole)
-                                    <x-filament::badge :color="$role->getColor()" size="sm">{{ $role->getLabel() }}</x-filament::badge>
+                                    <x-foodpecker.action :action="($this->toggleRoleAction)(['member' => $member->id, 'role' => $role->value])">
+                                        <x-filament::badge :color="$role->getColor()" size="sm">{{ $role->getLabel() }}</x-filament::badge>
+                                    </x-foodpecker.action>
                                 @endif
                             </td>
                             <td class="px-3 py-2 text-gray-500">{{ $member->membership?->joined_at?->format('d.m.Y') ?? '—' }}</td>

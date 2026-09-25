@@ -71,8 +71,8 @@ it('records role changes, removals and people leaving', function () {
     actingInGroup($this->owner, $this->group);
 
     Livewire::test(Members::class)
-        ->callAction('changeRole', data: ['user_id' => $this->participant->id, 'role' => GroupRole::Moderator->value])
-        ->assertNotified('Rolle aktualisiert.')
+        ->callAction(TestAction::make('toggleRole')->arguments(['member' => $this->participant->id, 'role' => GroupRole::Participant->value]))
+        ->assertNotified('Paul Teil ist jetzt Moderator.')
         ->callAction(TestAction::make('removeMember')->arguments(['member' => $this->moderator->id]))
         ->assertNotified('Mona Mod wurde aus der Gruppe entfernt.');
 

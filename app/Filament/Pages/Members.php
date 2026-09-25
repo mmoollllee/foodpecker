@@ -139,34 +139,39 @@ class Members extends Page implements HasActions, HasSchemas
             ->send();
     }
 
-    public function changeRoleAction(): Action
+    /**
+     * The role badge in the member list is the switch: one click turns a
+     * participant into a moderator and back. Only stepping down yourself
+     * asks first — nobody but the owner or another moderator can undo it.
+     */
+    public function toggleRoleAction(): Action
     {
-        return Action::make('changeRole')
-            ->label('Rolle ändern')
-            ->icon(Heroicon::OutlinedShieldCheck)
-            ->color('gray')
-            ->visible(fn (): bool => $this->currentUser()->can('manageMembers', $this->getGroup()))
-            ->schema([
-                Select::make('user_id')
-                    ->label('Mitglied')
-                    ->options(fn (): array => $this->getGroup()->memberOptions([$this->getGroup()->owner_id]))
-                    ->searchable()
-                    ->required(),
-                Select::make('role')
-                    ->label('Neue Rolle')
-                    ->options(collect(GroupRole::assignable())->mapWithKeys(fn (GroupRole $role): array => [$role->value => $role->getLabel()]))
-                    ->required(),
-            ])
-            ->action(function (array $data): void {
-                $member = $this->getGroup()->members()->whereKey((int) $data['user_id'])->first();
+        return Action::make('toggleRole')
+            ->badge()
+            ->size('sm')
+            ->label(fn (array $arguments): ?string => $this->shownRoleFromArguments($arguments)?->getLabel())
+            ->color(fn (array $arguments): string => $this->shownRoleFromArguments($arguments)?->getColor() ?? 'gray')
+            ->tooltip(fn (array $arguments): ?string => ($role = $this->switchedRoleFromArguments($arguments)) ? 'Zum '.$role->getLabel().' machen' : null)
+            ->extraAttributes(['class' => 'transition hover:ring-2 hover:ring-primary-500/50'])
+            ->visible(fn (array $arguments): bool => $this->currentUser()->can('manageMembers', $this->getGroup())
+                && ($member = $this->memberFromArguments($arguments)) !== null
+                && ! $member->isOwnerOf($this->getGroup()))
+            ->requiresConfirmation()
+            ->modal(fn (array $arguments): bool => (int) ($arguments['member'] ?? 0) === $this->currentUser()->id)
+            ->modalHeading('Moderator-Rolle abgeben?')
+            ->modalDescription('Du bist danach Teilnehmer. Zurück zum Moderator macht dich nur der Owner oder ein anderer Moderator.')
+            ->modalSubmitActionLabel('Abgeben')
+            ->action(function (array $arguments): void {
+                $member = $this->memberFromArguments($arguments);
+                $role = $this->switchedRoleFromArguments($arguments);
 
-                $changed = $member instanceof User && $this->attempt(
-                    fn () => app(GroupMembership::class)->changeRole($this->getGroup(), $member, GroupRole::from($data['role']), $this->currentUser()),
+                $changed = $member instanceof User && $role instanceof GroupRole && $this->attempt(
+                    fn () => app(GroupMembership::class)->changeRole($this->getGroup(), $member, $role, $this->currentUser()),
                     'Rolle nicht geändert',
                 );
 
                 if ($changed) {
-                    Notification::make()->title('Rolle aktualisiert.')->success()->send();
+                    Notification::make()->title($member->fullName().' ist jetzt '.$role->getLabel().'.')->success()->send();
                 }
             });
     }
@@ -403,7 +408,6 @@ class Members extends Page implements HasActions, HasSchemas
             $this->acceptOwnerTransferAction(),
             $this->declineOwnerTransferAction(),
             $this->inviteAction(),
-            $this->changeRoleAction(),
             $this->transferOwnershipAction(),
             $this->cancelOwnerTransferAction(),
             $this->leaveGroupAction(),
@@ -462,6 +466,34 @@ class Members extends Page implements HasActions, HasSchemas
     protected function memberFromArguments(array $arguments): ?User
     {
         return $this->getGroup()->members()->whereKey((int) ($arguments['member'] ?? 0))->first();
+    }
+
+    /**
+     * The role a member's badge showed when it was clicked.
+     *
+     * @param  array<string, mixed>  $arguments
+     */
+    protected function shownRoleFromArguments(array $arguments): ?GroupRole
+    {
+        $role = $arguments['role'] ?? null;
+
+        return is_string($role) ? GroupRole::tryFrom($role) : null;
+    }
+
+    /**
+     * A badge click switches away from the role the badge showed, not from
+     * the stored one — so a second click on an outdated badge (a double
+     * click, two moderators at once) does not undo the first.
+     *
+     * @param  array<string, mixed>  $arguments
+     */
+    protected function switchedRoleFromArguments(array $arguments): ?GroupRole
+    {
+        return match ($this->shownRoleFromArguments($arguments)) {
+            GroupRole::Participant => GroupRole::Moderator,
+            GroupRole::Moderator => GroupRole::Participant,
+            default => null,
+        };
     }
 
     /**

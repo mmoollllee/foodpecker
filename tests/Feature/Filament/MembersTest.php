@@ -47,8 +47,49 @@ it('keeps participants out of invitations and role changes', function () {
 
     Livewire::test(Members::class)
         ->assertActionHidden('invite')
-        ->assertActionHidden('changeRole')
+        ->assertActionHidden(TestAction::make('toggleRole')->arguments(['member' => $this->moderator->id, 'role' => GroupRole::Moderator->value]))
         ->assertActionVisible('leaveGroup');
+});
+
+it('switches the role with one click on the badge', function (GroupRole $shown, GroupRole $switchedTo, string $notification) {
+    $member = User::factory()->create(['first_name' => 'Nora', 'last_name' => 'Neu']);
+    $this->group->members()->attach($member->id, ['role' => $shown->value]);
+    actingInGroup($this->owner, $this->group);
+
+    Livewire::test(Members::class)
+        ->mountAction(TestAction::make('toggleRole')->arguments(['member' => $member->id, 'role' => $shown->value]))
+        ->assertNotified($notification);
+
+    expect($this->group->roleOf($member))->toBe($switchedTo);
+})->with([
+    'participant to moderator' => [GroupRole::Participant, GroupRole::Moderator, 'Nora Neu ist jetzt Moderator.'],
+    'moderator to participant' => [GroupRole::Moderator, GroupRole::Participant, 'Nora Neu ist jetzt Teilnehmer.'],
+]);
+
+it('asks before moderators give up their own role', function () {
+    actingInGroup($this->moderator, $this->group);
+
+    Livewire::test(Members::class)
+        ->mountAction(TestAction::make('toggleRole')->arguments(['member' => $this->moderator->id, 'role' => GroupRole::Moderator->value]))
+        ->assertActionMounted('toggleRole');
+
+    expect($this->group->roleOf($this->moderator))->toBe(GroupRole::Moderator);
+});
+
+it('keeps the owner badge out of the role switch', function () {
+    actingInGroup($this->owner, $this->group);
+
+    Livewire::test(Members::class)
+        ->assertActionHidden(TestAction::make('toggleRole')->arguments(['member' => $this->owner->id, 'role' => GroupRole::Owner->value]));
+});
+
+it('does not switch a moderator back when an outdated badge still showed participant', function () {
+    actingInGroup($this->owner, $this->group);
+
+    Livewire::test(Members::class)
+        ->callAction(TestAction::make('toggleRole')->arguments(['member' => $this->moderator->id, 'role' => GroupRole::Participant->value]));
+
+    expect($this->group->roleOf($this->moderator))->toBe(GroupRole::Moderator);
 });
 
 it('lets everybody but the owner leave the group', function () {
