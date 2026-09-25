@@ -11,7 +11,6 @@ use App\Models\Manufacturer;
 use App\Models\Note;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -63,8 +62,9 @@ it('keeps notes on private manufacturers inside the group', function () {
 
     actingInGroup($this->otherOwner, $this->otherGroup);
 
-    Livewire::test(ViewManufacturer::class, ['record' => $private->id]);
-})->throws(ModelNotFoundException::class);
+    Livewire::test(ViewManufacturer::class, ['record' => $private->id])
+        ->assertNotFound();
+});
 
 it('stores uploaded documents privately and hands them out only to allowed people', function () {
     actingInGroup($this->owner, $this->group);

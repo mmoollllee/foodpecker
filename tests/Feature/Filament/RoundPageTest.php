@@ -19,7 +19,6 @@ use App\Services\Proposals\ProposalBuilder;
 use App\Services\Proposals\ProposalWorkflow;
 use App\Services\Rounds\ParticipantExclusion;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Livewire;
 
@@ -79,8 +78,9 @@ it('keeps members of other groups out of the round', function () {
 
     actingInGroup($stranger, $otherGroup);
 
-    Livewire::test(ViewRound::class, ['record' => $this->round->id]);
-})->throws(ModelNotFoundException::class);
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertNotFound();
+});
 
 it('shows drafts only to their lead', function () {
     $this->round->update(['phase' => RoundPhase::Draft]);
@@ -91,8 +91,9 @@ it('shows drafts only to their lead', function () {
         ->assertActionVisible('startRound');
 
     actingInGroup($this->anna, $this->group);
-    Livewire::test(ViewRound::class, ['record' => $this->round->id]);
-})->throws(ModelNotFoundException::class);
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertNotFound();
+});
 
 it('lets participants vote and asks for a reason for a thumbs down', function () {
     publishAndConfirm($this->round, $this->proposal, $this->lead);
