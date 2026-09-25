@@ -74,6 +74,10 @@ class CartItemForm
     }
 
     /**
+     * The browser counts the step from the min value, so both stay on the
+     * same 0.01 grid — a min of 0.001 would reject 0.1 or 5 and only accept
+     * 0.101 or 5.001.
+     *
      * @return array<int, TextInput>
      */
     private static function quantityInputs(): array
@@ -82,7 +86,7 @@ class CartItemForm
             TextInput::make('exact_quantity')
                 ->label('Exakte Menge')
                 ->numeric()
-                ->minValue(0.001)
+                ->minValue(0.01)
                 ->step(0.01)
                 ->suffix(fn (Get $get): ?string => static::unitFor($get))
                 ->visible(fn (Get $get): bool => static::mode($get) === QuantityMode::Exact)
@@ -98,7 +102,7 @@ class CartItemForm
             TextInput::make('max_quantity')
                 ->label('Höchstens')
                 ->numeric()
-                ->minValue(0.001)
+                ->minValue(0.01)
                 ->gte('min_quantity')
                 ->step(0.01)
                 ->suffix(fn (Get $get): ?string => static::unitFor($get))
