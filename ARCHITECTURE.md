@@ -645,6 +645,10 @@ Deployt wird per [`mmoollllee/laravel-deployer`](https://github.com/mmoollllee/l
 aus der **lokalen** `.env` (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`,
 `DEPLOY_PHP`, `DEPLOY_SSH_KEY`), damit sie nicht im öffentlichen Repo stehen.
 
+Plesk setzt beim Veröffentlichen der Filament-Assets (`public/css|js|fonts/filament`)
+das Ausführbar-Bit. Damit Git sie deshalb nicht für geändert hält und `git pull`
+blockiert, stellt `deploy.php` im Server-Repo `core.fileMode=false` ein.
+
 Auf dem Server gehört in die `.env`: `APP_ENV=production`, `APP_DEBUG=false`,
 `APP_URL=https://…` (daraus entstehen die Einladungslinks), SMTP-Zugang und —
 falls ein Reverse Proxy davor sitzt — `TRUSTED_PROXIES`. Ist `APP_URL` https,

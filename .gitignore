@@ -8,12 +8,17 @@
 /.codex
 /.cursor/
 /.idea
+/.node-version
 /.nova
+/.php-ini
+/.php-version
 /.phpunit.cache
 /.vscode
 /.zed
 /auth.json
 /node_modules
+/public/.php-ini
+/public/.php-version
 /public/build
 /public/fonts-manifest.dev.json
 /public/hot

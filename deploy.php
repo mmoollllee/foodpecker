@@ -48,6 +48,12 @@ set('files', [
 
 desc('Publish code on the remote');
 task('deploy', function () {
+    // Plesk sets the executable bit on the Filament assets that composer
+    // republishes. Git would count them as changed and refuse to pull any
+    // commit touching them, although their content is the same.
+    cd('{{deploy_path}}');
+    run('git config core.fileMode false');
+
     deploy_standard();
 
     cd('{{deploy_path}}');
