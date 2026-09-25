@@ -11,6 +11,7 @@ use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
@@ -30,7 +31,10 @@ class RoundForm
         return $schema->components([
             Section::make('Eckdaten')
                 ->description('Den Lead wechselst du über „Weitere Aktionen → Lead-Rolle übergeben“ — mit Zustimmung der neuen Person.')
-                ->schema(static::basicsFields()),
+                ->schema([
+                    ...static::basicsFields(),
+                    static::financeFieldset(),
+                ]),
             Section::make('Sortiment')
                 ->description('Welche Produkte sind in dieser Runde bestellbar? Leer lassen = alle für die Gruppe sichtbaren Produkte.')
                 ->schema([static::productSelectionField()])
@@ -44,41 +48,34 @@ class RoundForm
                 ->schema(static::pickupFields())
                 ->columns(2)
                 ->collapsible(),
-            Section::make('Finanzen')
-                ->schema(static::financeFields())
-                ->columns(2)
-                ->collapsible(),
         ]);
     }
 
     /**
+     * Four short steps, so the wizard header shows all of them. The
+     * finances belong to the basics: the lead fee is set when the round opens.
+     *
      * @return array<int, Step>
      */
     public static function wizardSteps(): array
     {
         return [
-            Step::make('Worum geht\'s?')
-                ->description('Titel und kurze Beschreibung der Runde — du bist der Lead')
+            Step::make('Eckdaten')
                 ->icon(Heroicon::OutlinedSparkles)
-                ->schema(static::basicsFields()),
+                ->schema([
+                    ...static::basicsFields(),
+                    static::financeFieldset(),
+                ]),
             Step::make('Sortiment')
-                ->description('Welche Produkte sind diesmal bestellbar?')
                 ->icon(Heroicon::OutlinedShoppingCart)
                 ->schema([static::productSelectionField()]),
             Step::make('Zeitplan')
-                ->description('Wann passiert was?')
                 ->icon(Heroicon::OutlinedCalendarDays)
                 ->schema(static::scheduleFields())
                 ->columns(2),
             Step::make('Abholung')
-                ->description('Wo und wann holen die Teilnehmer die Ware ab?')
                 ->icon(Heroicon::OutlinedTruck)
                 ->schema(static::pickupFields())
-                ->columns(2),
-            Step::make('Finanzen')
-                ->description('Aufwandsentschädigung & Vereinsbeitrag')
-                ->icon(Heroicon::OutlinedBanknotes)
-                ->schema(static::financeFields())
                 ->columns(2),
         ];
     }
@@ -209,6 +206,17 @@ class RoundForm
     }
 
     /**
+     * What the round costs on top of the goods.
+     */
+    public static function financeFieldset(): Fieldset
+    {
+        return Fieldset::make('Finanzen')
+            ->schema(static::financeFields())
+            ->columns(2)
+            ->columnSpanFull();
+    }
+
+    /**
      * @return array<int, mixed>
      */
     public static function financeFields(): array
@@ -223,7 +231,7 @@ class RoundForm
                 ->suffix('% der Bestellsumme')
                 ->default(2.5)
                 ->required()
-                ->helperText('Für das Koordinieren der Runde. Wandert mit, falls der Lead-Status während der Runde übergeben wird. Typisch: 0–5 %.'),
+                ->helperText('Bekommt der Lead fürs Koordinieren der Runde. Wandert mit, falls der Lead-Status während der Runde übergeben wird. Typisch: 0–5 %.'),
             TextInput::make('platform_fee_percent')
                 ->label('Beitrag an den Foodpecker-Verein')
                 ->numeric()

@@ -77,7 +77,7 @@ class MyTasks extends Widget
         return match ($round->phase) {
             RoundPhase::Draft => $isLead ? [$this->draftTask($round, $url)] : [],
             RoundPhase::Shopping => $this->shoppingTasks($round, $user, $isLead, $url),
-            RoundPhase::Negotiating => $isLead ? [$this->task('📞', "Verhandlung für „{$round->title}“ abschließen", 'Preise beim Hersteller einholen, Vorschlag anpassen und zur Abstimmung freigeben.', 'Zur Runde', $url.'?tab=proposals', 'warning')] : [],
+            RoundPhase::Negotiating => $isLead ? [$this->task('📞', "Verhandlung für „{$round->title}“ abschließen", 'Preise beim Hersteller einholen, Vorschlag anpassen und zur Abstimmung freigeben.', 'Zur Runde', $url.'?phase=negotiating', 'warning')] : [],
             RoundPhase::Finalizing => $this->votingTasks($round, $user, $isLead, $url),
             RoundPhase::Payment => $this->paymentTasks($round, $user, $isLead, $url),
             RoundPhase::Ordering => $isLead ? [$this->task('📦', "Bestellung für „{$round->title}“ aufgeben", 'Alle haben bezahlt — jetzt beim Hersteller bestellen und danach „Weiter zu: Lieferung“.', 'Zur Runde', $url, 'amber')] : [],
@@ -134,13 +134,13 @@ class MyTasks extends Widget
             $pendingForMe = collect($consensus->items)->filter(fn ($item): bool => in_array($user->id, $item->pendingIds, true))->count();
 
             if ($pendingForMe > 0) {
-                $tasks[] = $this->task('🤝', "{$pendingForMe} offene Abstimmung(en) in „{$proposal->title}“", "Runde „{$round->title}“ — gib pro Position einen Daumen.", 'Zur Abstimmung', $url.'?tab=proposals', 'sky');
+                $tasks[] = $this->task('🤝', "{$pendingForMe} offene Abstimmung(en) in „{$proposal->title}“", "Runde „{$round->title}“ — gib pro Position einen Daumen.", 'Zur Abstimmung', $url.'?phase=finalizing', 'sky');
             }
 
             if ($isLead && $consensus->isUnanimous()) {
-                $tasks[] = $this->task('✅', "„{$proposal->title}“ ist einstimmig", 'Jetzt als finale Bestellung wählen und in die Zahlungsphase wechseln.', 'Zur Runde', $url.'?tab=proposals', 'success');
+                $tasks[] = $this->task('✅', "„{$proposal->title}“ ist einstimmig", 'Jetzt als finale Bestellung wählen und in die Zahlungsphase wechseln.', 'Zur Runde', $url.'?phase=finalizing', 'success');
             } elseif ($isLead && $consensus->rejections() !== []) {
-                $tasks[] = $this->task('✋', "„{$proposal->title}“ wird blockiert", 'Lies die Begründungen und erstelle eine neue Version, die für alle passt.', 'Zur Runde', $url.'?tab=proposals', 'warning');
+                $tasks[] = $this->task('✋', "„{$proposal->title}“ wird blockiert", 'Lies die Begründungen und erstelle eine neue Version, die für alle passt.', 'Zur Runde', $url.'?phase=finalizing', 'warning');
             }
         }
 
@@ -156,14 +156,14 @@ class MyTasks extends Widget
         $myPayment = $round->payments()->where('user_id', $user->id)->first();
 
         if ($myPayment?->status === PaymentStatus::Pending) {
-            $tasks[] = $this->task('💶', "Anteil für „{$round->title}“ überweisen", Money::format($myPayment->totalCents()).' an '.($round->lead?->fullName() ?? 'den Lead').($round->payment_deadline ? ' bis '.$round->payment_deadline->format('d.m.Y') : '').'.', 'Details', $url.'?tab=fulfillment', 'danger');
+            $tasks[] = $this->task('💶', "Anteil für „{$round->title}“ überweisen", Money::format($myPayment->totalCents()).' an '.($round->lead?->fullName() ?? 'den Lead').($round->payment_deadline ? ' bis '.$round->payment_deadline->format('d.m.Y') : '').'.', 'Details', $url.'?phase=payment', 'danger');
         }
 
         if ($isLead) {
             $pending = $round->payments()->where('status', PaymentStatus::Pending->value)->count();
 
             if ($pending > 0) {
-                $tasks[] = $this->task('✅', "{$pending} Zahlung(en) für „{$round->title}“ abhaken", 'Markiere eingegangene Überweisungen als bezahlt.', 'Zahlungen', $url.'?tab=fulfillment', 'amber');
+                $tasks[] = $this->task('✅', "{$pending} Zahlung(en) für „{$round->title}“ abhaken", 'Markiere eingegangene Überweisungen als bezahlt.', 'Zahlungen', $url.'?phase=payment', 'amber');
             }
         }
 
@@ -186,7 +186,7 @@ class MyTasks extends Widget
             "Ware aus „{$round->title}“ abholen",
             $myPickup->pickup_date_id ? ($round->pickup_location ?? 'Beim Lead abholen.') : 'Wähl noch einen Abholtermin.',
             'Termine',
-            $url.'?tab=fulfillment',
+            $url.'?phase=pickup',
             'success',
         )];
     }

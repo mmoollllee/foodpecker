@@ -6,6 +6,7 @@ use App\Concerns\HasActivities;
 use App\Concerns\HasAttachments;
 use App\Concerns\HasNotes;
 use App\Enums\RoundPhase;
+use Carbon\CarbonInterface;
 use Database\Factories\RoundFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -186,6 +187,36 @@ class Round extends Model
             $query->where('phase', '!=', RoundPhase::Draft->value)
                 ->orWhere('lead_user_id', $user->getKey());
         });
+    }
+
+    /**
+     * Whether the round went through the given phase already.
+     */
+    public function hasPassed(RoundPhase $phase): bool
+    {
+        return $this->phase !== RoundPhase::Cancelled && $phase->order() < $this->phase->order();
+    }
+
+    /**
+     * The date that matters for a phase: its deadline, the expected
+     * delivery or the first pickup date.
+     *
+     * @return array{0: string, 1: CarbonInterface}|null Prefix like "bis" and the date.
+     */
+    public function dateFor(RoundPhase $phase): ?array
+    {
+        [$prefix, $date] = match ($phase) {
+            RoundPhase::Shopping => ['bis', $this->shopping_deadline],
+            RoundPhase::Negotiating => ['bis', $this->negotiation_deadline],
+            RoundPhase::Finalizing => ['bis', $this->finalization_deadline],
+            RoundPhase::Payment => ['bis', $this->payment_deadline],
+            RoundPhase::Delivery => ['ca.', $this->expected_delivery],
+            RoundPhase::Pickup => ['ab', $this->pickupDates->first()?->scheduled_at],
+            RoundPhase::Completed => ['am', $this->phase === RoundPhase::Completed ? $this->phase_changed_at : null],
+            default => [null, null],
+        };
+
+        return $date instanceof CarbonInterface ? [$prefix, $date] : null;
     }
 
     public function isLead(User $user): bool

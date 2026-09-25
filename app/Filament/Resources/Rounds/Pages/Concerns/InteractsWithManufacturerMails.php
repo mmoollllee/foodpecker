@@ -15,6 +15,7 @@ use Filament\Forms\Components\ToggleButtons;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Collection;
 
 /**
  * Prepared mails to manufacturers: a price inquiry with the expected
@@ -23,23 +24,37 @@ use Filament\Support\Icons\Heroicon;
  */
 trait InteractsWithManufacturerMails
 {
+    /**
+     * Pass `type` and `manufacturer` arguments to open the mail for that
+     * occasion and manufacturer, e.g. the price inquiry while negotiating.
+     */
     public function composeManufacturerMailAction(): Action
     {
         return Action::make('composeManufacturerMail')
-            ->label('E-Mail an Hersteller')
+            ->label(fn (array $arguments): string => match (ManufacturerMailType::tryFrom((string) ($arguments['type'] ?? ''))) {
+                ManufacturerMailType::PriceInquiry => 'Preisanfrage per Mail',
+                ManufacturerMailType::Order => 'Bestellung per Mail',
+                default => 'E-Mail an Hersteller',
+            })
             ->icon(Heroicon::OutlinedEnvelopeOpen)
-            ->visible(fn (): bool => $this->canManage()
+            ->visible(fn (array $arguments): bool => $this->canManage()
                 && $this->getRound()->phase->isActive()
                 && $this->getRound()->phase !== RoundPhase::Draft
-                && app(ManufacturerMailComposer::class)->manufacturersFor($this->getRound())->isNotEmpty())
+                && $this->composableManufacturers(ManufacturerMailType::tryFrom((string) ($arguments['type'] ?? '')))
+                    ->when(filled($arguments['manufacturer'] ?? null), fn ($manufacturers) => $manufacturers->where('id', (int) $arguments['manufacturer']))
+                    ->isNotEmpty())
             ->modalHeading('E-Mail an einen Hersteller')
             ->modalDescription('Foodpecker füllt die wichtigsten Eckpunkte aus der Runde ein. Du kannst den Text anpassen und dann in deinem Mailprogramm öffnen oder kopieren.')
             ->modalWidth('3xl')
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Schließen')
-            ->fillForm(function (): array {
-                $manufacturer = app(ManufacturerMailComposer::class)->manufacturersFor($this->getRound())->first();
-                $type = $this->getRound()->chosen_proposal_id !== null ? ManufacturerMailType::Order : ManufacturerMailType::PriceInquiry;
+            ->fillForm(function (array $arguments): array {
+                $type = ManufacturerMailType::tryFrom((string) ($arguments['type'] ?? ''))
+                    ?? ($this->getRound()->chosen_proposal_id !== null ? ManufacturerMailType::Order : ManufacturerMailType::PriceInquiry);
+                $composable = $this->composableManufacturers($type);
+                $manufacturer = $composable->firstWhere('id', (int) ($arguments['manufacturer'] ?? 0))
+                    ?? $composable->first()
+                    ?? app(ManufacturerMailComposer::class)->manufacturersFor($this->getRound())->first();
 
                 return [
                     'manufacturer_id' => $manufacturer?->id,
@@ -94,6 +109,26 @@ trait InteractsWithManufacturerMails
                                 JS),
                     ]),
             ]);
+    }
+
+    /**
+     * Manufacturers of the round a mail of the given type can be written
+     * to — all of them without a type.
+     *
+     * @return Collection<int, Manufacturer>
+     */
+    protected function composableManufacturers(?ManufacturerMailType $type): Collection
+    {
+        $composer = app(ManufacturerMailComposer::class);
+        $manufacturers = $composer->manufacturersFor($this->getRound());
+
+        if ($type === null) {
+            return $manufacturers;
+        }
+
+        return $manufacturers
+            ->filter(fn (Manufacturer $manufacturer): bool => $composer->canCompose($this->getRound(), $manufacturer, $type))
+            ->values();
     }
 
     protected function refillManufacturerMail(Get $get, Set $set): void

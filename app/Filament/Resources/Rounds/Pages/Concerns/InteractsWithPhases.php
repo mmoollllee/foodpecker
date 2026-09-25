@@ -192,6 +192,8 @@ trait InteractsWithPhases
             return;
         }
 
+        $this->selectedPhase = null;
+
         Notification::make()
             ->title('Phase: '.$to->getLabel())
             ->success()

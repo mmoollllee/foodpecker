@@ -3,6 +3,7 @@
 use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\Pages\ListRounds;
 use App\Models\Round;
+use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -30,6 +31,12 @@ it('lists completed and cancelled rounds as history', function () {
         ->set('activeTab', 'historie')
         ->assertCanSeeTableRecords([$this->completed, $this->cancelled])
         ->assertCanNotSeeTableRecords([$this->running, $this->draft]);
+});
+
+it('opens a round from the list without a separate edit button', function () {
+    Livewire::test(ListRounds::class)
+        ->assertActionVisible(TestAction::make('view')->table($this->running))
+        ->assertActionDoesNotExist(TestAction::make('edit')->table($this->running));
 });
 
 it('says that no round is running when there is none', function () {

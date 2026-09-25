@@ -74,7 +74,8 @@ it('shows the running round and where you stand in it', function () {
     Livewire::test(CurrentRound::class)
         ->assertSee($this->round->title)
         ->assertSee('Bestätigung')
-        ->assertSee('Du bist dabei — 1 Artikel im Warenkorb.');
+        ->assertSee('Du bist dabei — 1 Artikel im Warenkorb.')
+        ->assertSeeHtml('?phase=payment');
 });
 
 it('points to the last round and to the next one while no round is running', function () {

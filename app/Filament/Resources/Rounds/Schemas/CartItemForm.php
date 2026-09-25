@@ -13,6 +13,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
+use Filament\Schemas\Components\Flex;
 use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\HtmlString;
@@ -49,19 +50,35 @@ class CartItemForm
     }
 
     /**
+     * The kind of quantity and its inputs side by side in one row.
+     *
      * @return array<int, mixed>
      */
     public static function quantityFields(): array
     {
         return [
-            ToggleButtons::make('quantity_mode')
-                ->label('Mengenangabe')
-                ->options(QuantityMode::class)
-                ->default(QuantityMode::Exact->value)
-                ->required()
-                ->inline()
-                ->live()
+            Flex::make([
+                ToggleButtons::make('quantity_mode')
+                    ->label('Mengenangabe')
+                    ->options(QuantityMode::class)
+                    ->default(QuantityMode::Exact->value)
+                    ->required()
+                    ->inline()
+                    ->live()
+                    ->grow(false),
+                ...static::quantityInputs(),
+            ])
+                ->from('sm')
                 ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * @return array<int, TextInput>
+     */
+    private static function quantityInputs(): array
+    {
+        return [
             TextInput::make('exact_quantity')
                 ->label('Exakte Menge')
                 ->numeric()

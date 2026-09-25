@@ -411,13 +411,14 @@ Die fachliche Regel steht in [`docs/concept.md`](docs/concept.md) (Abschnitt
   Bestätigungsphase; legt Zahlungen und Abholungen an) und Wahl aufheben.
 - `ParticipantExclusion` schließt Teilnehmer aus — als letzter Ausweg beim
   Vorbereiten einer neuen Version: Die Aktion steckt im „⋯“-Menü eines
-  Entwurfs im Tab „Vorschläge“ und bietet nur an, wer einem freigegebenen
+  Entwurfs (Phasen Verhandlung und Bestätigung) und bietet nur an, wer einem freigegebenen
   Vorschlag nicht zugestimmt oder nicht abgestimmt hat (`candidatesFor()`).
   Grund Pflicht, Lead nie, nur in Verhandlung und Bestätigung. Entwürfe mit
   der Person werden ohne sie neu berechnet; freigegebene Vorschläge werden
   zurückgezogen, eine gewählte finale Bestellung wird aufgehoben. Wieder
-  aufnehmen geht bis zur Bestätigung (auch nach einem Rücksprung in den
-  Einkauf) und rechnet die Entwürfe mit der Person neu.
+  aufnehmen (in der Teilnehmerliste der Übersicht) geht bis zur Bestätigung
+  (auch nach einem Rücksprung in den Einkauf) und rechnet die Entwürfe mit
+  der Person neu.
 - `ProposalBuilder::recalculate()` bringt einen Entwurf auf den Stand der
   aktiven Warenkörbe: Gebinde und verhandelte Preise bleiben, die Mengen werden
   neu verteilt, Produkte ohne Nachfrage fallen weg, neue kommen mit passender
@@ -489,8 +490,8 @@ Verlauf vorbeigeht. Wer handelt, geben die Services mit, wo sie es wissen
 (`logActivity(..., $actor)`) — z. B. beim Beitritt über einen Einladungslink.
 
 **Notizen und Dokumente**: polymorphe Modelle `Note` und `Attachment`, genutzt
-über den Trait `InteractsWithNotesAndDocuments` auf der Rundenseite (Tab
-„Notizen & Verlauf“) und auf den Detailseiten von Herstellern und Produkten.
+über den Trait `InteractsWithNotesAndDocuments` auf der Rundenseite (in der
+Übersicht) und auf den Detailseiten von Herstellern und Produkten.
 Dateien liegen auf der **privaten** Disk (`storage/app/private/attachments/…`)
 und werden nur über `GET /dokumente/{attachment}` nach Rechteprüfung
 ausgeliefert (`AttachmentController`, `AttachmentPolicy`). Erlaubt sind PDF,
@@ -549,14 +550,33 @@ app/
 └── Concerns/                     HasActivities, HasAttachments, HasNotes
 ```
 
-Die Runden-Seite (`ViewRound`) ist eine Filament-`ViewRecord`-Seite: Kopfbereich
-plus Tabs (Übersicht, Warenkörbe, Vorschläge, Zahlung & Abholung, Notizen &
-Verlauf), der aktive Tab steht im Query-String (`?tab=proposals`). Die Tabs
-sind Blade-Partials unter `resources/views/filament/rounds/tabs/`. Im Tab
-„Vorschläge“ steht jeder Vorschlag als Tabelle untereinander
-(`partials/proposal.blade.php`): Positionen als Zeilen, eine Spalte pro Person
-— die eigene zuerst, mit den Abstimm-Buttons —, darunter Versand, Beiträge und
-Summe pro Person.
+Die Runden-Seite (`ViewRound`) hat drei Sektionen, jede Information steht nur
+an einer Stelle:
+
+- **Ablauf**: die Phasen als klickbare Schritte mit ihrem Datum
+  (`?phase=payment`, auch vom Dashboard aus). Darunter steht alles, was in der
+  gewählten Phase passiert, samt Aktionen (`resources/views/filament/rounds/phases/`):
+  Einkauf die Warenkörbe — ein Klick auf eine Menge ändert sie, die eigene
+  immer, als Lead auch die der anderen (`editCartItem`) —, Verhandlung und
+  Bestätigung die Vorschläge, Zahlung die Zahlungen, Bestellung die
+  Bestellliste je Hersteller mit vorformulierter Mail, Abholung Abholort,
+  Termine und wer schon abgeholt hat. „Weiter zu …“ steht nur in der
+  laufenden Phase.
+- **Verlauf & Benachrichtigungen**: eine Zeitleiste aus dem Aktivitäten-Stream
+  und den verschickten Benachrichtigungen (Text aufklappbar); darüber sieht
+  der Lead unversendete Entwürfe und erzeugt neue.
+- **Übersicht**: Eckdaten (Beschreibung, Aufwandsentschädigung,
+  Vereinsbeitrag), Teilnehmer (mit Ausschlüssen und „Wieder aufnehmen“),
+  Notizen und Dokumente.
+
+Jeder Vorschlag ist eine Tabelle (`partials/proposal.blade.php`): Positionen
+als Zeilen, eine Spalte pro Person — die eigene zuerst, mit den
+Abstimm-Buttons —, darunter Versand, Beiträge und Summe pro Person. Die
+Begründung eines 👎 zeigt ein Tooltip am Daumen.
+
+Bewusst doppelt: die Vorschläge in Verhandlung und Bestätigung (sie gehören zu
+beiden Phasen) und die Prozentsätze der Beiträge in den Eckdaten und in der
+Kostenzeile jedes Vorschlags (dort erklären sie die Beträge).
 
 **Badge-Farben**: Die Enums färben ihre Badges mit Tailwind-Farbnamen (Phase
 „Bestätigung“ `amber`, Kategorien, Owner-Rolle …). Filament kennt nur die

@@ -12,6 +12,7 @@ use App\Enums\QuantityMode;
 use App\Enums\RoundPhase;
 use App\Enums\Visibility;
 use App\Enums\VoteValue;
+use App\Models\Activity;
 use App\Models\CartItem;
 use App\Models\Group;
 use App\Models\Manufacturer;
@@ -565,9 +566,9 @@ class DemoSeeder extends Seeder
         }
 
         // Aktivitäten-Stream
-        $active->logActivity('phase_changed', ['from' => 'negotiating', 'to' => 'finalizing']);
-        $active->logActivity('proposal_published', ['proposal_id' => $proposalA->id, 'title' => $proposalA->title]);
-        $active->logActivity('proposal_published', ['proposal_id' => $proposalB->id, 'title' => $proposalB->title]);
+        $this->backdate($active->logActivity('phase_changed', ['from' => 'negotiating', 'to' => 'finalizing']), $active->phase_changed_at);
+        $this->backdate($active->logActivity('proposal_published', ['proposal_id' => $proposalA->id, 'title' => $proposalA->title]), $proposalA->published_at);
+        $this->backdate($active->logActivity('proposal_published', ['proposal_id' => $proposalB->id, 'title' => $proposalB->title]), $proposalB->published_at);
         $proposalA->logActivity('created', ['title' => $proposalA->title]);
         $proposalB->logActivity('created', ['title' => $proposalB->title]);
 
@@ -621,7 +622,7 @@ class DemoSeeder extends Seeder
         $this->cartExact($shopping, $kira, $senf, 4);
         $this->cartFlex($shopping, $kira, $spaghetti, 2, 5);
 
-        $shopping->logActivity('phase_changed', ['from' => 'draft', 'to' => 'shopping']);
+        $this->backdate($shopping->logActivity('phase_changed', ['from' => 'draft', 'to' => 'shopping']), $shopping->phase_changed_at);
 
         // ---------------- Offene Einladung ----------------
         $schoeneberg->invitations()->create([
@@ -715,6 +716,17 @@ SVG;
      * Demo groups were founded when their first member joined — not when
      * the seeder ran.
      */
+    /**
+     * Demo events happened back then, not when seeding — so the history
+     * lists them in the right order next to the notifications.
+     */
+    private function backdate(Activity $activity, ?Carbon $at): void
+    {
+        if ($at !== null) {
+            $activity->forceFill(['created_at' => $at, 'updated_at' => $at])->save();
+        }
+    }
+
     private function backdateFounding(Group $group): void
     {
         $foundedAt = Carbon::parse($group->members()->min('group_user.joined_at'));

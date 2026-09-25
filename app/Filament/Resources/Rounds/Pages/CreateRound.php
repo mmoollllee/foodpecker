@@ -32,7 +32,7 @@ class CreateRound extends CreateRecord
             return "Gerade läuft „{$running->title}“ — du kannst die nächste Runde schon vorbereiten und startest sie, sobald diese abgeschlossen ist.";
         }
 
-        return 'In fünf Schritten zur neuen Runde — alle Angaben sind später noch änderbar.';
+        return 'In vier Schritten zur neuen Runde — du bist ihr Lead. Alle Angaben sind später noch änderbar.';
     }
 
     public function hasSkippableSteps(): bool

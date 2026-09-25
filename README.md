@@ -124,8 +124,9 @@ Demo-Daten werden auf Servern nicht angelegt. Details: `ARCHITECTURE.md` §18.
 1. Auf dem Server registrieren und eine Gruppe gründen (du wirst Owner).
 2. Unter „Hersteller“ und „Produkte“ das Sortiment anlegen — Preise in Euro, pro
    Gebindegröße eine Preisstaffel.
-3. „Bestellrunden → Neue Runde starten“: Zeitplan, Abholort und mindestens einen
-   Abholtermin eintragen, dann „Bestellrunde starten“.
+3. „Bestellrunden → Neue Runde starten“: Titel und Aufwandsentschädigung,
+   Zeitplan, Abholort und mindestens einen Abholtermin eintragen, dann
+   „Bestellrunde starten“.
 4. Unter „Mitglieder & Einladungen“ einladen — mehrere Adressen durch Komma
    getrennt. Kommt keine Mail an, „Link kopieren“ und per Messenger schicken.
 5. Alle füllen „Mein Warenkorb“. Danach „Weiter zu: Verhandlung“, Vorschlag

@@ -105,35 +105,44 @@ it('klickt sich durch alle Resource-Seiten und prüft Konsolen-Fehler', function
         ->screenshot(filename: '07-members');
 });
 
-it('öffnet die aktive Runde, zeigt die Tab-Navigation und Voting-Buttons', function () {
+it('opens the running round with its phases, proposals and overview', function () {
     $this->actingAs($this->marie);
 
     $activeRoundId = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail()->id;
 
     $page = visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}")
         ->assertSee('Frühjahr-Bestellung 2026')
-        ->assertSee('Phase: Bestätigung')
-        // Tab-Navigation
-        ->assertSee('Übersicht')
-        ->assertSee('Warenkörbe')
-        ->assertSee('Vorschläge')
-        ->assertSee('Zahlung & Abholung')
-        ->assertSee('Notizen & Verlauf')
-        ->assertNoJavaScriptErrors()
-        ->screenshot(filename: '08-round-detail-overview', fullPage: true);
-
-    // Vorschläge sichtbar nach Klick auf Tab
-    $page->click('Vorschläge')
-        ->wait(1)
+        ->assertSee('Ablauf')
+        ->assertSee('läuft gerade')
         ->assertSee('Vorschlag A')
         ->assertSee('Vorschlag B')
         ->assertSee('👍')
         ->assertSee('👎')
-        ->assertSee('Ein halber 50-kg-Sack ist mir zu viel')
-        ->screenshot(filename: '09-round-detail-proposals', fullPage: true);
+        ->assertSee('Verlauf & Benachrichtigungen')
+        ->assertSee('Übersicht')
+        ->assertSee('Teilnehmer')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '08-round-detail-overview', fullPage: true);
+
+    // Clicking a phase shows what matters in it
+    $page->click('button[aria-pressed]:has-text("Zahlung")')
+        ->wait(1)
+        ->assertSee('Alle überweisen ihren Anteil an den Lead')
+        ->assertSee('kommt noch')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '08b-round-phase-payment', fullPage: true);
+
+    // Back to the proposals, the reason of a thumbs down shows on hover
+    $page->click('button[aria-pressed]:has-text("Bestätigung")')
+        ->wait(1)
+        ->hover('span[x-tooltip]:has-text("👎")')
+        ->wait(1)
+        ->assertScript("document.querySelector('[data-tippy-root]')?.innerText.includes('Ein halber 50-kg-Sack ist mir zu viel') ?? false", true)
+        ->assertNoJavaScriptErrors()
+        ->screenshot(fullPage: false, filename: '09-round-detail-proposals');
 });
 
-it('öffnet das "Artikel hinzufügen"-Modal über den Header', function () {
+it('opens the add item modal from the panel of the shopping phase', function () {
     $this->actingAs($this->marie);
 
     $activeRoundId = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail()->id;
@@ -154,6 +163,26 @@ it('öffnet das "Artikel hinzufügen"-Modal über den Header', function () {
         ->screenshot(filename: '10-cart-item-modal', fullPage: true);
 });
 
+it('changes a quantity with a click into the carts table', function () {
+    $this->actingAs($this->marie);
+
+    $round = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail();
+    $round->update(['phase' => 'shopping']);
+
+    visit("/g/speisekammer-schoeneberg/rounds/{$round->id}")
+        ->assertSee('Klick auf eine Menge, um sie zu ändern')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '10b-carts-in-shopping-phase', fullPage: true)
+        ->click('button[aria-label="Menge von Tobias ändern"] >> nth=0')
+        ->wait(1)
+        ->assertSee('Warenkorb von Tobias Hartmann')
+        ->assertSee('Gebindegrößen & Preise')
+        ->assertSee('Mengenangabe')
+        ->assertSee('Entfernen')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '10c-edit-quantity-modal');
+});
+
 it('rendert die abgeschlossene Runde mit Zahlungen und Abholungen', function () {
     $this->actingAs($this->marie);
 
@@ -161,8 +190,8 @@ it('rendert die abgeschlossene Runde mit Zahlungen und Abholungen', function () 
 
     $page = visit("/g/speisekammer-schoeneberg/rounds/{$completedRoundId}")
         ->assertSee('Spätsommer-Bestellung 2025')
-        ->assertSee('Phase: Abgeschlossen')
-        ->click('Zahlung & Abholung')
+        ->assertSee('Die Runde ist abgeschlossen')
+        ->click('button[aria-pressed]:has-text("Zahlung")')
         ->wait(1)
         ->assertSee('Bezahlt')
         ->assertNoJavaScriptErrors()
@@ -184,13 +213,13 @@ it('Bestellrunden-Wizard zeigt fünf Schritte inklusive Sortiment-Auswahl', func
     $page = visit('/g/speisekammer-schoeneberg/rounds/create')
         ->wait(1)
         ->assertSee('Neue Bestellrunde starten')
-        ->assertSee('Worum geht\'s?')
+        ->assertSee('Eckdaten')
         ->assertSee('Sortiment')
         ->assertSee('Zeitplan')
         ->assertSee('Abholung')
         ->assertSee('Finanzen')
         ->assertSee('Titel der Runde')
-        ->assertSee('du bist der Lead')
+        ->assertSee('Aufwandsentschädigung für den Lead')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '13-round-wizard-step1', fullPage: true);
 });
@@ -291,7 +320,13 @@ it('shows the cart of the running round and opens the add modal without a Bindin
         ->assertSee('Mengenangabe')
         ->assertSee('Produkt')
         ->assertNoJavaScriptErrors()
-        ->screenshot(filename: '19-my-cart-add-modal', fullPage: true);
+        ->screenshot(filename: '19-my-cart-add-modal', fullPage: true)
+        ->click('Flexibel')
+        ->wait(1)
+        ->assertSee('Mindestens')
+        ->assertSee('Höchstens')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '19b-my-cart-add-modal-flexible');
 });
 
 it('Produkt-Ansehen-Modal zeigt die Product-Card mit Preisstaffeln', function () {
@@ -330,7 +365,7 @@ it('shows a round to a participant without any lead actions', function () {
 
     $this->actingAs($jonas);
 
-    visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}?tab=proposals")
+    visit("/g/speisekammer-schoeneberg/rounds/{$activeRoundId}?phase=finalizing")
         ->assertSee('Vorschlag A')
         ->assertSee('👎')
         ->assertDontSee('Weiter zu:')
@@ -348,7 +383,7 @@ it('lets the lead exclude a blocking participant while preparing a new version',
 
     $this->actingAs($this->marie);
 
-    visit("/g/speisekammer-schoeneberg/rounds/{$round->id}?tab=proposals")
+    visit("/g/speisekammer-schoeneberg/rounds/{$round->id}?phase=finalizing")
         ->assertSee('Vorschlag A — 50-kg-Reis (Version 2)')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '22-round-draft-as-lead', fullPage: true)

@@ -29,12 +29,6 @@
         'Vereinsbeitrag ('.$percent($round->platform_fee_percent).')' => [$totals->platformFeeCents, fn ($share) => $share->platformFeeCents],
     ];
 
-    $objections = $isVotedOn
-        ? $proposal->items->flatMap(fn ($item) => $item->votes
-            ->filter(fn ($vote) => $vote->value === VoteValue::Down && filled($vote->reason))
-            ->map(fn ($vote) => ['item' => $item, 'vote' => $vote]))
-        : collect();
-
     $stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-900';
 @endphp
 
@@ -132,13 +126,21 @@
                                         $proposal->isPublished() => '⏳',
                                         default => '',
                                     };
-                                    $opinion = $allocation ? null : $item->votes->firstWhere('user_id', $userId)?->value;
+                                    $vote = $item->votes->firstWhere('user_id', $userId);
+                                    $name = $participant->user?->first_name;
+                                    $tooltip = match ($symbol) {
+                                        '👍' => $name.' stimmt zu',
+                                        '👎' => $name.': „'.($vote?->reason ?? '—').'“',
+                                        '⏳' => $name.' hat noch nicht abgestimmt',
+                                        default => null,
+                                    };
+                                    $opinion = $allocation ? null : $vote;
                                 @endphp
                                 <td @class(['whitespace-nowrap px-3 py-2 text-center', 'bg-primary-500/5' => $isMe])>
                                     @if ($allocation)
                                         <div class="tabular-nums">
                                             @unless ($isMe && $canVoteHere)
-                                                <span title="{{ match ($symbol) { '👍' => 'stimmt zu', '👎' => 'stimmt nicht zu', '⏳' => 'hat noch nicht abgestimmt', default => '' } }}">{{ $symbol }}</span>
+                                                <span @if ($tooltip) x-tooltip="{ content: @js($tooltip), theme: $store.theme }" @endif>{{ $symbol }}</span>
                                             @endunless
                                             {{ CartItem::formatQuantity((float) $allocation->quantity) }} {{ $unit }}
                                         </div>
@@ -146,7 +148,10 @@
                                     @else
                                         <span class="text-gray-300 dark:text-gray-600">—</span>
                                         @if ($opinion && ! ($isMe && $canVoteHere))
-                                            <span class="text-xs opacity-60" title="Meinung — zählt nicht, weil {{ $participant->user?->first_name }} hiervon nichts bekommt">{{ $opinion === VoteValue::Up ? '👍' : '👎' }}</span>
+                                            <span
+                                                class="text-xs opacity-60"
+                                                x-tooltip="{ content: @js('Meinung von '.$name.' — zählt nicht, weil '.$name.' hiervon nichts bekommt'.($opinion->reason ? ': „'.$opinion->reason.'“' : '')), theme: $store.theme }"
+                                            >{{ $opinion->value === VoteValue::Up ? '👍' : '👎' }}</span>
                                         @endif
                                     @endif
 
@@ -191,16 +196,5 @@
                 </tfoot>
             </table>
         </div>
-
-        @if ($objections->isNotEmpty())
-            <div class="space-y-1 text-xs text-gray-600 dark:text-gray-400">
-                @foreach ($objections as ['item' => $item, 'vote' => $vote])
-                    <p>
-                        👎 <span class="font-medium">{{ $vote->user?->first_name }}</span> zu {{ $item->product?->name }}{{ $item->stakeholderIds()->contains((int) $vote->user_id) ? '' : ' (nur Meinung)' }}:
-                        <span class="italic">„{{ $vote->reason }}“</span>
-                    </p>
-                @endforeach
-            </div>
-        @endif
     </div>
 </x-filament::section>

@@ -26,7 +26,7 @@
             <div class="rounded-xl border border-gray-200 p-4 text-sm text-gray-600 dark:border-white/10 dark:text-gray-300">
                 Der Einkauf ist vorbei — die Runde ist in der Phase „{{ $round->phase->getLabel() }}“. Deine Wünsche lassen sich nicht mehr ändern;
                 was du tatsächlich bekommst, steht in den
-                <a href="{{ $roundUrl }}?tab=proposals" class="font-medium text-primary-600 underline dark:text-primary-400">Vorschlägen der Runde</a>.
+                <a href="{{ $roundUrl }}?phase=finalizing" class="font-medium text-primary-600 underline dark:text-primary-400">Vorschlägen der Runde</a>.
             </div>
         @elseif ($isFull)
             <div class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">

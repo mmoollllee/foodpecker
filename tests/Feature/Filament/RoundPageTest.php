@@ -156,7 +156,7 @@ it('lets the lead exclude somebody who did not agree while preparing a new versi
         ->and($this->proposal->fresh()->status)->toBe(ProposalStatus::Withdrawn);
 });
 
-it('lets the lead take an excluded participant back in from the proposals tab', function () {
+it('lets the lead take an excluded participant back in from the list of participants', function () {
     publishAndConfirm($this->round, $this->proposal, $this->lead);
     app(ParticipantExclusion::class)->exclude($this->round, $this->ben, 'Keine Rückmeldung', $this->lead);
     $participant = $this->round->participantFor($this->ben);
@@ -203,12 +203,149 @@ it('switches to the next phase and opens the prepared notification', function ()
     actingInGroup($this->lead, $this->group);
 
     Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->set('selectedPhase', RoundPhase::Shopping->value)
         ->assertActionHasLabel('nextPhase', 'Weiter zu: Verhandlung')
         ->callAction('nextPhase', data: ['prepare_notification' => true])
-        ->assertActionMounted('sendDraft');
+        ->assertActionMounted('sendDraft')
+        ->assertSet('selectedPhase', null);
 
     expect($this->round->fresh()->phase)->toBe(RoundPhase::Negotiating)
         ->and(NotificationDraft::where('round_id', $this->round->id)->value('subject'))->toStartWith('📞 Verhandlungen laufen');
+});
+
+it('shows what matters in the running phase and lets people look at the others', function () {
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSee('Der Lead fragt bei den Herstellern die Preise')
+        ->assertSee('läuft gerade')
+        ->set('selectedPhase', RoundPhase::Payment->value)
+        ->assertSee('Alle überweisen ihren Anteil an den Lead')
+        ->assertSee('kommt noch')
+        ->assertSee('Die Zahlungen entstehen, sobald ein Vorschlag als finale Bestellung gewählt ist.')
+        ->set('selectedPhase', RoundPhase::Shopping->value)
+        ->assertSee('erledigt');
+});
+
+it('offers moving on only in the panel of the running phase', function () {
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSee('Weiter zu: Bestätigung')
+        ->set('selectedPhase', RoundPhase::Shopping->value)
+        ->assertDontSee('Weiter zu: Bestätigung');
+});
+
+it('ignores a phase that has no panel', function () {
+    actingInGroup($this->lead, $this->group);
+
+    $page = Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->set('selectedPhase', 'nonsense');
+
+    expect($page->instance()->getSelectedPhase())->toBe(RoundPhase::Negotiating);
+});
+
+it('prepares the mail that fits the phase for the manufacturers', function () {
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSee('Preisanfrage per Mail')
+        ->assertActionVisible(TestAction::make('composeManufacturerMail')->arguments(['type' => 'price_inquiry', 'manufacturer' => $this->rice->manufacturer_id]))
+        ->assertActionHidden(TestAction::make('composeManufacturerMail')->arguments(['type' => 'order']));
+});
+
+it('lets everybody change their own quantity in the carts and the lead everybody else\'s', function () {
+    $this->round->update(['phase' => RoundPhase::Shopping]);
+    $annasRice = ['product' => $this->rice->id, 'user' => $this->anna->id];
+    $bensRice = ['product' => $this->rice->id, 'user' => $this->ben->id];
+
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertActionHidden(TestAction::make('editCartItem')->arguments($bensRice))
+        ->callAction(TestAction::make('editCartItem')->arguments($annasRice), data: ['quantity_mode' => 'exact', 'exact_quantity' => 7])
+        ->assertHasNoActionErrors()
+        ->assertNotified('Warenkorb gespeichert.');
+
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->callAction(TestAction::make('editCartItem')->arguments($bensRice), data: ['quantity_mode' => 'flexible', 'min_quantity' => 2, 'max_quantity' => 6])
+        ->assertHasNoActionErrors();
+
+    $carts = CartItem::where('round_id', $this->round->id)->get()->keyBy('user_id');
+
+    expect((float) $carts[$this->anna->id]->exact_quantity)->toBe(7.0)
+        ->and((float) $carts[$this->ben->id]->max_quantity)->toBe(6.0);
+});
+
+it('lets people remove what they put in the cart', function () {
+    $this->round->update(['phase' => RoundPhase::Shopping]);
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->callAction([
+            TestAction::make('editCartItem')->arguments(['product' => $this->rice->id, 'user' => $this->anna->id]),
+            TestAction::make('removeCartItem'),
+        ])
+        ->assertNotified('Artikel entfernt.');
+
+    expect(CartItem::where('round_id', $this->round->id)->where('user_id', $this->anna->id)->exists())->toBeFalse();
+});
+
+it('keeps the carts read-only once shopping is over', function () {
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertActionHidden(TestAction::make('editCartItem')->arguments(['product' => $this->rice->id, 'user' => $this->anna->id]));
+});
+
+it('shows the reason of a thumbs down when hovering it', function () {
+    publishAndConfirm($this->round, $this->proposal, $this->lead);
+    app(ProposalWorkflow::class)->vote($this->item, $this->ben, VoteValue::Down, 'Zu viel Reis');
+
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSeeHtml('x-tooltip')
+        ->assertSeeHtml('Zu viel Reis');
+});
+
+it('shows the phases, then the history, then the overview of the round', function () {
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertDontSeeHtml('role="tab"')
+        ->assertSeeInOrder(['Ablauf', 'Verlauf & Benachrichtigungen', 'Übersicht', 'Eckdaten', 'Teilnehmer', 'Notizen', 'Dokumente']);
+});
+
+it('lists sent notifications in the history between what happened', function () {
+    $this->round->logActivity('updated');
+    $sent = app(DraftBuilder::class)->buildDraft($this->round, NotificationKind::Custom, $this->lead);
+    $sent->forceFill(['subject' => 'Kurzes Update', 'sent_at' => now()->addMinute(), 'sent_by_user_id' => $this->lead->id, 'recipient_count' => 3])->save();
+    $draft = app(DraftBuilder::class)->buildDraft($this->round, NotificationKind::Custom, $this->lead);
+    $draft->update(['subject' => 'Noch nicht verschickt']);
+
+    actingInGroup($this->anna, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSeeInOrder(['Benachrichtigung an 3 Personen: „Kurzes Update“', 'Eckdaten der Runde aktualisiert'])
+        ->assertDontSee('Noch nicht verschickt');
+
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->assertSee('Entwurf: Noch nicht verschickt')
+        ->assertActionVisible(TestAction::make('sendDraft')->arguments(['draft' => $draft->id]));
+});
+
+it('shows the whole product when a quantity in the carts is clicked', function () {
+    $this->round->update(['phase' => RoundPhase::Shopping]);
+    actingInGroup($this->lead, $this->group);
+
+    Livewire::test(ViewRound::class, ['record' => $this->round->id])
+        ->mountAction(TestAction::make('editCartItem')->arguments(['product' => $this->rice->id, 'user' => $this->anna->id]))
+        ->assertMountedActionModalSee(['Warenkorb von '.$this->anna->fullName(), 'Gebindegrößen', $this->rice->name]);
 });
 
 it('sends a notification by mail to the participants and remembers it', function () {

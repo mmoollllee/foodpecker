@@ -11,7 +11,6 @@ use App\Models\User;
 use App\Services\Money\Money;
 use Filament\Facades\Filament;
 use Filament\Widgets\Widget;
-use Illuminate\Support\Carbon;
 
 /**
  * A group runs one round at a time — this is it, at a glance. Without a
@@ -54,24 +53,8 @@ class CurrentRound extends Widget
             'round' => $round,
             'url' => RoundResource::getUrl('view', ['record' => $round]),
             'cartUrl' => $user->can('shop', $round) ? MyCart::getUrl() : null,
-            'dates' => $this->dates($round),
+            'phaseUrl' => fn (RoundPhase $phase): string => RoundResource::getUrl('view', ['record' => $round, 'phase' => $phase->value]),
             'participation' => $this->participation($round, $user),
-        ];
-    }
-
-    /**
-     * The schedule of the round, with the date of the current phase marked.
-     *
-     * @return array<string, array{0: ?Carbon, 1: bool}>
-     */
-    private function dates(Round $round): array
-    {
-        return [
-            'Einkauf bis' => [$round->shopping_deadline, $round->phase === RoundPhase::Shopping],
-            'Verhandlung bis' => [$round->negotiation_deadline, $round->phase === RoundPhase::Negotiating],
-            'Bestätigung bis' => [$round->finalization_deadline, $round->phase === RoundPhase::Finalizing],
-            'Zahlung bis' => [$round->payment_deadline, $round->phase === RoundPhase::Payment],
-            'Lieferung' => [$round->expected_delivery, in_array($round->phase, [RoundPhase::Ordering, RoundPhase::Delivery], true)],
         ];
     }
 

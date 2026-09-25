@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\Rounds\Pages;
 
-use App\Enums\ProposalStatus;
+use App\Enums\RoundPhase;
 use App\Filament\Concerns\InteractsWithNotesAndDocuments;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithCarts;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithFulfillment;
@@ -18,14 +18,13 @@ use App\Models\User;
 use Filament\Actions\ActionGroup;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
-use Filament\Schemas\Components\Tabs;
-use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Url;
 
 /**
  * Dashboard of a single round. Lead-only actions are hidden for everybody
@@ -45,6 +44,13 @@ class ViewRound extends ViewRecord
     use InteractsWithProposals;
 
     protected static string $resource = RoundResource::class;
+
+    /**
+     * Phase whose details and actions are shown below the phase steps.
+     * Empty means the phase the round is in.
+     */
+    #[Url(as: 'phase')]
+    public ?string $selectedPhase = null;
 
     /**
      * @var array<int, string>
@@ -91,12 +97,7 @@ class ViewRound extends ViewRecord
     {
         $round = $this->getRound();
 
-        return sprintf(
-            'Lead: %s · Phase: %s · %d Teilnehmer',
-            $round->lead?->fullName() ?? '—',
-            $round->phase->getLabel(),
-            $round->activeParticipantCount(),
-        );
+        return 'Lead: '.($round->lead?->fullName() ?? '—');
     }
 
     protected function resolveRecord(int|string $key): Model
@@ -104,19 +105,18 @@ class ViewRound extends ViewRecord
         return parent::resolveRecord($key)->load(static::RELATIONS);
     }
 
+    /**
+     * Actions that belong to a phase — adding to the cart, creating a
+     * proposal, moving on — sit in that phase's panel, not up here.
+     */
     protected function getHeaderActions(): array
     {
         return [
             $this->acceptLeadHandoverAction(),
             $this->declineLeadHandoverAction(),
             $this->startRoundAction(),
-            $this->nextPhaseAction(),
-            $this->addCartItemAction(),
-            $this->createProposalAction(),
             $this->editRoundAction(),
             ActionGroup::make([
-                $this->generateNotificationAction(),
-                $this->composeManufacturerMailAction(),
                 $this->requestLeadHandoverAction(),
                 $this->cancelLeadHandoverAction(),
                 $this->previousPhaseAction(),
@@ -130,40 +130,38 @@ class ViewRound extends ViewRecord
         ];
     }
 
+    /**
+     * Everything that happens in a phase sits in that phase's panel, then
+     * what happened so far and what belongs to the whole round.
+     */
     public function infolist(Schema $schema): Schema
     {
         return $schema
             ->columns(1)
             ->components([
-                View::make('filament.rounds.partials.phase-header'),
-                Tabs::make('round')
-                    ->tabs([
-                        Tab::make('Übersicht')
-                            ->id('overview')
-                            ->icon(Heroicon::OutlinedEye)
-                            ->schema([View::make('filament.rounds.tabs.overview')]),
-                        Tab::make('Warenkörbe')
-                            ->id('carts')
-                            ->icon(Heroicon::OutlinedShoppingCart)
-                            ->badge(fn (): ?int => $this->getRound()->cartItems->pluck('product_id')->unique()->count() ?: null)
-                            ->schema([View::make('filament.rounds.tabs.carts')]),
-                        Tab::make('Vorschläge')
-                            ->id('proposals')
-                            ->icon(Heroicon::OutlinedDocumentText)
-                            ->badge(fn (): ?int => $this->getRound()->proposals->where('status', '!=', ProposalStatus::Withdrawn)->count() ?: null)
-                            ->schema([View::make('filament.rounds.tabs.proposals')]),
-                        Tab::make('Zahlung & Abholung')
-                            ->id('fulfillment')
-                            ->icon(Heroicon::OutlinedBanknotes)
-                            ->schema([View::make('filament.rounds.tabs.fulfillment')]),
-                        Tab::make('Notizen & Verlauf')
-                            ->id('activity')
-                            ->icon(Heroicon::OutlinedClock)
-                            ->badge(fn (): ?int => ($this->getRound()->notes->count() + $this->getRound()->attachments->count()) ?: null)
-                            ->schema([View::make('filament.rounds.tabs.activity')]),
-                    ])
-                    ->persistTabInQueryString(),
+                View::make('filament.rounds.phases'),
+                View::make('filament.rounds.history'),
+                View::make('filament.rounds.overview'),
             ]);
+    }
+
+    /**
+     * The phase shown in the phase panel: the one somebody clicked, else the
+     * running one. A draft previews shopping, a cancelled round shows none.
+     */
+    public function getSelectedPhase(): ?RoundPhase
+    {
+        $selected = RoundPhase::tryFrom((string) $this->selectedPhase);
+
+        if ($selected !== null && ! in_array($selected, [RoundPhase::Draft, RoundPhase::Cancelled], true)) {
+            return $selected;
+        }
+
+        return match ($this->getRound()->phase) {
+            RoundPhase::Draft => RoundPhase::Shopping,
+            RoundPhase::Cancelled => null,
+            default => $this->getRound()->phase,
+        };
     }
 
     public function currentUser(): User

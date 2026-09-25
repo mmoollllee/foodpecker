@@ -5,7 +5,6 @@ namespace App\Filament\Resources\Rounds\Tables;
 use App\Enums\RoundPhase;
 use App\Models\Round;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -67,7 +66,6 @@ class RoundsTable
             ])
             ->recordActions([
                 ViewAction::make()->label('Öffnen'),
-                EditAction::make()->label('Bearbeiten')->slideOver(),
                 DeleteAction::make()
                     ->label('Löschen')
                     ->modalDescription('Nur Entwürfe und abgebrochene Runden können gelöscht werden.'),

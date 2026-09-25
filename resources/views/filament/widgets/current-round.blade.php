@@ -25,16 +25,7 @@
                     </div>
                 </div>
 
-                <x-foodpecker.phase-steps :round="$round" />
-
-                <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-5">
-                    @foreach ($dates as $label => [$date, $isCurrent])
-                        <div>
-                            <dt class="text-gray-500">{{ $label }}</dt>
-                            <dd @class(['font-medium', 'text-primary-600 dark:text-primary-400' => $isCurrent])>{{ $date?->format('d.m.Y') ?? '—' }}</dd>
-                        </div>
-                    @endforeach
-                </dl>
+                <x-foodpecker.phase-steps :round="$round" :href="$phaseUrl" :with-dates="true" />
 
                 @if ($round->pickup_location || $round->pickupDates->isNotEmpty())
                     <div class="flex flex-wrap items-center gap-2 text-sm">
