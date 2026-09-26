@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\GroupRole;
-use App\Enums\PackagingStrategy;
 use App\Enums\PaymentStatus;
 use App\Enums\ProductCategory;
 use App\Enums\ProposalStatus;
@@ -31,7 +30,6 @@ it('registers every color the enums use for their badges', function (string $enu
     expect(array_keys(FilamentColor::getColors()))->toContain(...$colors);
 })->with([
     GroupRole::class,
-    PackagingStrategy::class,
     PaymentStatus::class,
     ProductCategory::class,
     ProposalStatus::class,

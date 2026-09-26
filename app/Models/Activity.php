@@ -44,7 +44,7 @@ class Activity extends Model
 
     /**
      * Human readable sentence for the activity stream and notification
-     * drafts, e.g. "Marie: Phase Einkauf → Verhandlung".
+     * drafts, e.g. "Marie: Phase Einkauf → Anpassung".
      */
     public function describe(): string
     {
@@ -62,11 +62,15 @@ class Activity extends Model
             'name' => 'Name',
             'visibility' => 'Sichtbarkeit',
             'description' => 'Beschreibung',
+            'portion_size' => 'Portionsgröße',
+            // Fields products had before package sizes could be combined.
             'estimated_price_cents' => 'Richtwert',
             'packaging_strategy' => 'Verpackung',
             'unit' => 'Einheit',
             'category' => 'Kategorie',
-            'manufacturer_id' => 'Hersteller',
+            'supplier_id' => 'Lieferant',
+            // Before suppliers were called manufacturers.
+            'manufacturer_id' => 'Lieferant',
             'image_path' => 'Bild',
             'slug' => 'URL-Kürzel',
             'website' => 'Website',
@@ -90,7 +94,7 @@ class Activity extends Model
             'created' => match ($this->subject_type) {
                 OrderProposal::class => 'Vorschlag '.($title ?? '').' erstellt',
                 Round::class => 'Runde '.($title ?? '').' angelegt',
-                Manufacturer::class => 'Hersteller '.($title ?? '').' angelegt',
+                Supplier::class => 'Lieferant '.($title ?? '').' angelegt',
                 Product::class => 'Produkt '.($title ?? '').' angelegt',
                 Group::class => 'Gruppe '.($title ?? '').' gegründet',
                 default => 'angelegt',
@@ -112,6 +116,11 @@ class Activity extends Model
                 isset($properties['price_cents']) && ($properties['change'] ?? null) !== 'removed' ? ' ('.Money::format((int) $properties['price_cents']).')' : '',
             ),
             'attachment_added' => 'Dokument hochgeladen: '.implode(', ', $properties['names'] ?? []),
+            'supplier_inquired' => 'Preise bei „'.($properties['supplier'] ?? '?').'“ angefragt',
+            'supplier_responded' => 'Rückmeldung von „'.($properties['supplier'] ?? '?').'“ eingetragen',
+            'supplier_ordered' => 'Bei „'.($properties['supplier'] ?? '?').'“ bestellt',
+            'supplier_delivered' => 'Lieferung von „'.($properties['supplier'] ?? '?').'“ ist angekommen',
+            'catalog_prices_adopted' => ($properties['count'] ?? 0).' bestätigte Preise ins Sortiment übernommen',
             'phase_changed' => sprintf(
                 'Phase %s → %s%s',
                 RoundPhase::tryFrom($properties['from'] ?? '')?->getLabel() ?? '?',

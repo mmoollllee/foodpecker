@@ -12,6 +12,10 @@
         </x-foodpecker.fact>
     </x-slot>
 
+    <x-slot name="actions">
+        @include('filament.rounds.partials.packing-list-button', ['round' => $round])
+    </x-slot>
+
     <x-slot name="details">
         @include('filament.rounds.partials.pickups', ['round' => $round])
     </x-slot>

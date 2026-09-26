@@ -22,7 +22,7 @@ class ManageProducts extends ManageRecords
             CreateAction::make()
                 ->label('Produkt anlegen')
                 ->modalHeading('Neues Produkt anlegen')
-                ->modalDescription('In vier Schritten zum neuen Produkt — Stammdaten, Verpackungs-Logik, Preisstaffeln, Beschreibung.')
+                ->modalDescription('In vier Schritten zum neuen Produkt — Stammdaten, Verteilung, Gebinde & Preise, Beschreibung.')
                 ->modalWidth('5xl')
                 ->steps(ProductForm::wizardSteps())
                 ->mutateDataUsing(fn (array $data): array => [

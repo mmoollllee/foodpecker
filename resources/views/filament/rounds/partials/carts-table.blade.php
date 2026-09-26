@@ -2,6 +2,7 @@
     use App\Enums\QuantityMode;
     use App\Models\CartItem;
     use App\Models\RoundParticipant;
+    use App\Services\Money\Money;
 
     /** @var \App\Models\Round $round */
     $currentUserId = $this->currentUser()->id;
@@ -27,6 +28,7 @@
         ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
         : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
     $stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-900';
+    $estimate = $this->cartEstimate();
 @endphp
 
 @if ($itemsByProduct->isEmpty())
@@ -65,10 +67,21 @@
                                     <span class="text-xs text-gray-400">(archiviert)</span>
                                 @endif
                             </div>
-                            <div class="text-xs text-gray-500">{{ $product?->manufacturer?->name }} · {{ $product?->packagingSummary() }}</div>
+                            <div class="text-xs text-gray-500">{{ $product?->supplier?->name }} · {{ $product?->packagingSummary() }}</div>
+                            @if ($productEstimate = $estimate->forProduct((int) $productId))
+                                <div class="text-xs text-gray-500">
+                                    ≈ {{ $productEstimate->distribution->mix->describe() }}
+                                    @if ($productEstimate->freeQuantity() > 0.001)
+                                        · <span class="text-amber-700 dark:text-amber-300">noch {{ CartItem::formatAmount($productEstimate->freeQuantity(), $unit) }} frei</span>
+                                    @endif
+                                </div>
+                            @endif
                         </td>
                         <td class="whitespace-nowrap px-3 py-2 text-end tabular-nums">
-                            {{ CartItem::formatQuantity($min) }}{{ abs($max - $min) > 0.0001 ? '–'.CartItem::formatQuantity($max) : '' }} {{ $unit }}
+                            {{ CartItem::formatRange($min, $max, $unit) }}
+                            @if ($productEstimate)
+                                <div class="text-xs text-gray-500">≈ {{ Money::format($productEstimate->distribution->totalPriceCents()) }}</div>
+                            @endif
                         </td>
                         @foreach ($columns as $participant)
                             @php
@@ -96,11 +109,28 @@
                                 @else
                                     <span class="text-gray-300 dark:text-gray-600">—</span>
                                 @endif
+                                @if ($item && ($share = $productEstimate?->shareCentsFor($userId)))
+                                    <div class="mt-0.5 text-xs tabular-nums text-gray-500">≈ {{ Money::format($share) }}</div>
+                                @endif
                             </td>
                         @endforeach
                     </tr>
                 @endforeach
             </tbody>
+            <tfoot class="border-t border-gray-200 dark:border-white/10">
+                <tr class="text-sm font-semibold">
+                    <th class="{{ $stickyCell }} py-2 pe-4 text-left">
+                        Voraussichtlich
+                        <span class="block text-xs font-normal text-gray-500">inkl. Beiträge, ohne Versand</span>
+                    </th>
+                    <td class="whitespace-nowrap px-3 py-2 text-end tabular-nums">{{ Money::format($estimate->withFees($estimate->goodsCents())) }}</td>
+                    @foreach ($columns as $participant)
+                        <td @class(['whitespace-nowrap px-3 py-2 text-center tabular-nums', 'bg-primary-500/5' => (int) $participant->user_id === $currentUserId])>
+                            {{ ($total = $estimate->totalCentsFor((int) $participant->user_id)) > 0 ? Money::format($total) : '—' }}
+                        </td>
+                    @endforeach
+                </tr>
+            </tfoot>
         </table>
     </div>
 @endif

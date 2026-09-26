@@ -3,11 +3,11 @@
 use App\Enums\GroupRole;
 use App\Enums\RoundPhase;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\PriceTier;
 use App\Models\Product;
 use App\Models\Round;
 use App\Models\RoundParticipant;
+use App\Models\Supplier;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -52,19 +52,18 @@ function roundScenario(int $members = 3, RoundPhase $phase = RoundPhase::Shoppin
 }
 
 /**
- * A product of the group with a single price tier.
+ * A product of the group with a single package size. Without a portion
+ * size every package goes whole to one person.
  */
-function productWithTier(Group $group, float $packageAmount = 10, int $priceCents = 3000, bool $divisible = true, ?float $step = 0.5): Product
+function productWithTier(Group $group, float $packageAmount = 10, int $priceCents = 3000, ?float $portion = 0.5): Product
 {
-    $manufacturer = Manufacturer::factory()->create(['group_id' => $group->id]);
-    $product = Product::factory()->create(['group_id' => $group->id, 'manufacturer_id' => $manufacturer->id]);
+    $supplier = Supplier::factory()->create(['group_id' => $group->id]);
+    $product = Product::factory()->create(['group_id' => $group->id, 'supplier_id' => $supplier->id, 'portion_size' => $portion]);
 
     PriceTier::factory()->for($product)->create([
         'label' => $packageAmount.' kg',
         'package_amount' => $packageAmount,
         'price_cents' => $priceCents,
-        'is_divisible' => $divisible,
-        'divisible_step' => $divisible ? $step : null,
     ]);
 
     return $product->load('priceTiers');

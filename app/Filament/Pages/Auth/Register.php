@@ -17,8 +17,8 @@ class Register extends BaseRegister
 
     public function mount(): void
     {
-        $token = session(InvitationController::SESSION_KEY)
-            ?? request()->query('invitation_token');
+        // Only the signed invitation link puts the token here.
+        $token = session(InvitationController::SESSION_KEY);
 
         if ($token) {
             $this->invitation = GroupInvitation::query()
@@ -47,7 +47,7 @@ class Register extends BaseRegister
                     ? 'Einladung zu '.$this->invitation->group->name.' annehmen'
                     : 'Konto anlegen')
                 ->description($this->invitation
-                    ? 'Lege Dein Konto an, um der Gruppe als '.$this->invitation->role->getLabel().' beizutreten.'
+                    ? 'Lege Dein Konto an, um der Gruppe als '.$this->invitation->role->getLabel().' beizutreten — gern auch mit einer anderen E-Mail-Adresse. Du hast schon ein Konto? Dann melde dich oben an, die Einladung gilt dann für dieses Konto.'
                     : 'Foodpecker ist nur nach Registrierung nutzbar. Du kannst entweder eine eigene Gruppe gründen oder einer Gruppe per Einladung beitreten.')
                 ->schema([
                     UserFields::firstName()->autofocus(),
@@ -65,12 +65,7 @@ class Register extends BaseRegister
 
     protected function getEmailFormComponent(): Component
     {
-        $field = parent::getEmailFormComponent()->label('E-Mail');
-        if ($this->invitation) {
-            $field->disabled()->dehydrated();
-        }
-
-        return $field;
+        return parent::getEmailFormComponent()->label('E-Mail');
     }
 
     protected function getPasswordFormComponent(): Component
@@ -95,7 +90,7 @@ class Register extends BaseRegister
         $user = $this->getUserModel()::create($data);
 
         if ($this->invitation && ! $this->invitation->isExpired()) {
-            $this->invitation->accept($user);
+            $this->invitation->acceptAs($user);
             session()->forget(InvitationController::SESSION_KEY);
         }
 

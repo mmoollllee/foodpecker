@@ -27,6 +27,14 @@ class GroupInvitation extends Model
         'accepted_at',
     ];
 
+    /**
+     * The token alone lets anybody join — it only ever leaves the server
+     * inside the signed link.
+     *
+     * @var list<string>
+     */
+    protected $hidden = ['token'];
+
     protected function casts(): array
     {
         return [
@@ -87,6 +95,27 @@ class GroupInvitation extends Model
             $this->expires_at ?? Carbon::now()->addDays(14),
             ['token' => $this->token],
         );
+    }
+
+    /**
+     * Whoever holds the link may join — with an account under another
+     * address, the invitation moves to that address. An invitation somebody
+     * else accepted in the meantime stays as it is.
+     */
+    public function acceptAs(User $user): void
+    {
+        if ($this->isAccepted()) {
+            return;
+        }
+
+        $email = mb_strtolower($user->email);
+
+        if ($email !== mb_strtolower($this->email)) {
+            $this->group->invitations()->whereKeyNot($this->id)->where('email', $email)->delete();
+            $this->forceFill(['email' => $email])->save();
+        }
+
+        $this->accept($user);
     }
 
     public function accept(User $user): void

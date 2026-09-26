@@ -24,7 +24,7 @@
     $percent = fn ($value): string => number_format((float) $value, 1, ',', '.').' %';
     $costRows = [
         'Waren' => [$totals->goodsCents, fn ($share) => $share->goodsCents],
-        'Versand' => [$totals->shippingCents, fn ($share) => $share->shippingShareCents],
+        'Versand (anteilig pro Lieferant)' => [$totals->shippingCents, fn ($share) => $share->shippingShareCents],
         'Aufwandsentschädigung Lead ('.$percent($round->lead_fee_percent).')' => [$totals->leadFeeCents, fn ($share) => $share->leadFeeCents],
         'Vereinsbeitrag ('.$percent($round->platform_fee_percent).')' => [$totals->platformFeeCents, fn ($share) => $share->platformFeeCents],
     ];
@@ -61,20 +61,17 @@
                     {{ app(ProposalWorkflow::class)->explainMissingConsensus($consensus) }}
                 </div>
             @endif
-        @elseif ($proposal->isProposedBy($this->currentUser()) || $this->canManage())
-            <p class="text-sm text-gray-500">Entwurf — pass Gebinde und Preise pro Position an und gib ihn dann zur Abstimmung frei.</p>
         @else
             <p class="text-sm text-gray-500">Entwurf — wird noch vorbereitet. Abgestimmt wird, sobald er freigegeben ist.</p>
         @endif
 
+        @include('filament.rounds.partials.proposal-changes', ['proposal' => $proposal])
+
         <div class="flex flex-wrap items-center gap-2 [&:not(:has(*))]:hidden">
+            <x-foodpecker.action :action="($this->approveAllAction)(['proposal' => $proposal->id])" />
             <x-foodpecker.action :action="($this->chooseProposalAction)(['proposal' => $proposal->id])" />
-            <x-foodpecker.action :action="($this->publishProposalAction)(['proposal' => $proposal->id])" />
-            <x-foodpecker.action :action="($this->editProposalAction)(['proposal' => $proposal->id])" />
             <x-foodpecker.action :action="($this->newProposalVersionAction)(['proposal' => $proposal->id])" />
             <x-foodpecker.action :action="($this->withdrawProposalAction)(['proposal' => $proposal->id])" />
-            <x-foodpecker.action :action="($this->deleteProposalAction)(['proposal' => $proposal->id])" />
-            <x-foodpecker.action :action="$this->draftMenu($proposal)" />
         </div>
 
         <div class="overflow-x-auto">
@@ -100,28 +97,28 @@
                         @php
                             $itemConsensus = $consensus->forItem($item->id);
                             $unit = $item->product?->unitLabel();
-                            $leftover = max(0, $item->totalQuantity() - (float) $item->allocations->sum('quantity'));
+                            $leftover = $item->overhang();
+                            $decides = $item->stakeholderIds();
                         @endphp
                         <tr class="align-top">
                             <td class="{{ $stickyCell }} py-2 pe-4">
                                 <div class="font-medium">{{ $item->product?->name }}</div>
-                                <div class="text-xs text-gray-500">{{ $item->packages_ordered }} × {{ $item->packageLabel() }} à {{ Money::format((int) $item->package_price_cents) }}</div>
+                                <div class="text-xs text-gray-500">{{ $item->describePackages() }}</div>
                                 @if ($item->notes)
                                     <div class="mt-1 whitespace-pre-line text-xs text-amber-700 dark:text-amber-300">⚠️ {{ $item->notes }}</div>
                                 @elseif ($leftover > 0.001)
-                                    <div class="mt-1 text-xs text-amber-700 dark:text-amber-300">⚠️ {{ CartItem::formatQuantity($leftover) }} {{ $unit }} bleiben übrig</div>
+                                    <div class="mt-1 text-xs text-amber-700 dark:text-amber-300">⚠️ {{ CartItem::formatAmount($leftover, $unit) }} {{ abs($leftover - 1) < 0.0005 ? 'bleibt' : 'bleiben' }} übrig</div>
                                 @endif
-                                <x-foodpecker.action :action="($this->editProposalItemAction)(['item' => $item->id])" />
                             </td>
                             <td class="whitespace-nowrap px-3 py-2 text-end tabular-nums">
-                                <div>{{ CartItem::formatQuantity($item->totalQuantity()) }} {{ $unit }}</div>
+                                <div>{{ CartItem::formatAmount($item->totalQuantity(), $unit) }}</div>
                                 <div class="text-xs text-gray-500">{{ Money::format((int) $item->total_price_cents) }}</div>
                             </td>
                             @foreach ($columns as $participant)
                                 @php
                                     $userId = (int) $participant->user_id;
                                     $isMe = $userId === $currentUserId;
-                                    $allocation = $item->allocations->first(fn ($allocation) => (int) $allocation->user_id === $userId && (float) $allocation->quantity > 0);
+                                    $allocation = $item->allocations->first(fn ($allocation) => (int) $allocation->user_id === $userId);
                                     $symbol = match (true) {
                                         ! $isVotedOn => '',
                                         in_array($userId, $itemConsensus?->approvedBy ?? [], true) => '👍',
@@ -145,7 +142,7 @@
                                             @unless ($isMe && $canVoteHere)
                                                 <span @if ($tooltip) x-tooltip="{ content: @js($tooltip), theme: $store.theme }" @endif>{{ $symbol }}</span>
                                             @endunless
-                                            {{ CartItem::formatQuantity((float) $allocation->quantity) }} {{ $unit }}
+                                            {{ CartItem::formatAmount((float) $allocation->quantity, $unit) }}
                                         </div>
                                         <div class="text-xs tabular-nums text-gray-500">{{ Money::format((int) $allocation->share_cents) }}</div>
                                     @else
@@ -153,7 +150,7 @@
                                         @if ($opinion && ! ($isMe && $canVoteHere))
                                             <span
                                                 class="text-xs opacity-60"
-                                                x-tooltip="{ content: @js('Meinung von '.$name.' — zählt nicht, weil '.$name.' hiervon nichts bekommt'.($opinion->reason ? ': „'.$opinion->reason.'“' : '')), theme: $store.theme }"
+                                                x-tooltip="{ content: @js('Meinung von '.$name.' — zählt nicht, weil '.$name.' das nicht bestellt hat'.($opinion->reason ? ': „'.$opinion->reason.'“' : '')), theme: $store.theme }"
                                             >{{ $opinion->value === VoteValue::Up ? '👍' : '👎' }}</span>
                                         @endif
                                     @endif
@@ -161,7 +158,7 @@
                                     @if ($isMe && $canVoteHere)
                                         <div @class([
                                             'mt-1 flex justify-center gap-1',
-                                            'opacity-40 transition hover:opacity-100 focus-within:opacity-100' => ! $allocation,
+                                            'opacity-40 transition hover:opacity-100 focus-within:opacity-100' => ! $decides->contains($userId),
                                         ])>
                                             <x-foodpecker.action :action="($this->voteUpAction)(['item' => $item->id])" />
                                             <x-foodpecker.action :action="($this->voteDownAction)(['item' => $item->id])" />

@@ -6,10 +6,12 @@ use App\Filament\Widgets\CurrentRound;
 use App\Filament\Widgets\GroupStatsOverview;
 use App\Filament\Widgets\MyTasks;
 use App\Models\CartItem;
+use App\Models\PickupDate;
 use App\Models\Round;
 use App\Services\Proposals\ProposalBuilder;
 use App\Services\Proposals\ProposalWorkflow;
 use App\Services\Rounds\ParticipantExclusion;
+use App\Services\Rounds\SupplierOrders;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -107,4 +109,44 @@ it('lets a prepared draft wait until the running round is over', function () {
 
     expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('title'))
         ->toContain('Entwurf „Nächste Runde“ starten');
+});
+
+it('reminds the lead to set pickup dates once the order is out', function () {
+    $this->round->update(['phase' => RoundPhase::Delivery]);
+
+    actingInGroup($this->lead, $this->group);
+
+    expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('title'))
+        ->toContain('Abholtermine für „'.$this->round->title.'“ festlegen');
+
+    PickupDate::create(['round_id' => $this->round->id, 'scheduled_at' => now()->addWeek()]);
+
+    expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('title'))
+        ->not->toContain('Abholtermine für „'.$this->round->title.'“ festlegen');
+});
+
+it('tells the lead which suppliers still owe an answer', function () {
+    $this->round->update(['phase' => RoundPhase::Negotiating]);
+    $supplier = $this->round->cartItems()->firstOrFail()->product->supplier;
+
+    actingInGroup($this->lead, $this->group);
+
+    expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('description'))
+        ->toContain('Noch ohne Rückmeldung: '.$supplier->name.'. Danach den Vorschlag prüfen und zur Abstimmung stellen.');
+});
+
+it('tells the lead where the order still has to go out and what still has to arrive', function () {
+    $supplier = $this->round->cartItems()->firstOrFail()->product->supplier;
+    $this->round->update(['chosen_proposal_id' => $this->proposal->id, 'phase' => RoundPhase::Ordering]);
+
+    actingInGroup($this->lead, $this->group);
+
+    expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('description'))
+        ->toContain('Alle haben bezahlt. Noch zu bestellen: '.$supplier->name.'.');
+
+    app(SupplierOrders::class)->markOrdered($this->round, $supplier, $this->lead);
+    $this->round->update(['phase' => RoundPhase::Delivery]);
+
+    expect(collect(Livewire::test(MyTasks::class)->viewData('tasks'))->pluck('description'))
+        ->toContain('Noch nicht angekommen: '.$supplier->name.'.');
 });

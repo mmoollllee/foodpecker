@@ -45,4 +45,28 @@ enum ProductUnit: string implements HasLabel
             self::Pack => 'Packung',
         };
     }
+
+    /**
+     * Short form after a quantity: "1 Packung", but "3 Packungen". Weights,
+     * volumes and "Stück" stay as they are, and so does "Glas" — "2 Glas
+     * Senf".
+     */
+    public function labelFor(float $quantity): string
+    {
+        return $this === self::Pack && abs($quantity - 1) > 0.0005 ? 'Packungen' : $this->shortLabel();
+    }
+
+    /**
+     * The unit behind a short label that is handed around as text.
+     */
+    public static function tryFromShortLabel(string $label): ?self
+    {
+        foreach (self::cases() as $unit) {
+            if ($unit->shortLabel() === $label) {
+                return $unit;
+            }
+        }
+
+        return null;
+    }
 }

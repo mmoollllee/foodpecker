@@ -61,6 +61,47 @@ it('lets people change their own details', function () {
         ->household_size->toBe(4);
 });
 
+it('keeps the bank details for rounds one leads, without spaces', function () {
+    $this->actingAs($this->me);
+    Filament::setCurrentPanel('global');
+
+    Livewire::test(EditProfile::class)
+        ->fillForm(['iban' => 'de89 3704 0044 0532 0130 00', 'bic' => 'cobadeffxxx'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($this->me->fresh())
+        ->iban->toBe('DE89370400440532013000')
+        ->bic->toBe('COBADEFFXXX');
+});
+
+it('shows the saved bank details again, but never sends them along with a user', function () {
+    $this->me->update(['iban' => 'DE89370400440532013000', 'bank_account_holder' => 'Paula Teil']);
+    $this->actingAs($this->me);
+    Filament::setCurrentPanel('global');
+
+    Livewire::test(EditProfile::class)
+        ->assertSchemaStateSet(['iban' => 'DE89 3704 0044 0532 0130 00', 'bank_account_holder' => 'Paula Teil'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($this->me->fresh()->iban)->toBe('DE89370400440532013000')
+        ->and(json_encode($this->me->fresh()))->not->toContain('DE89370400440532013000');
+});
+
+it('refuses an IBAN whose check digits do not add up', function () {
+    $this->actingAs($this->me);
+    Filament::setCurrentPanel('global');
+
+    Livewire::test(EditProfile::class)
+        ->fillForm(['iban' => 'DE89 3704 0044 0532 0130 01'])
+        ->call('save')
+        ->assertHasFormErrors(['iban'])
+        ->assertSee('Das ist keine gültige IBAN — bitte noch einmal prüfen.');
+
+    expect($this->me->fresh()->iban)->toBeNull();
+});
+
 it('keeps the nickname optional', function () {
     $this->me->update(['nickname' => 'Pauli']);
     $this->actingAs($this->me);

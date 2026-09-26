@@ -6,7 +6,6 @@ use App\Enums\VoteValue;
 use App\Models\CartItem;
 use App\Models\OrderProposal;
 use App\Models\Payment;
-use App\Services\Distribution\PackageSpec;
 use App\Services\Proposals\ProposalBuilder;
 use App\Services\Proposals\ProposalWorkflow;
 use App\Services\Rounds\ParticipantExclusion;
@@ -101,7 +100,7 @@ it('recalculates drafts without the excluded participant instead of withdrawing 
 });
 
 it('puts a readmitted participant back into the drafts', function () {
-    $mustard = productWithTier($this->group, packageAmount: 12, priceCents: 3600, step: 1);
+    $mustard = productWithTier($this->group, packageAmount: 12, priceCents: 3600, portion: 1);
     CartItem::factory()->for($this->round)->exact(12)->create(['user_id' => $this->ben->id, 'product_id' => $mustard->id]);
 
     $draft = app(ProposalBuilder::class)->createNewVersion($this->proposal->fresh(), $this->lead);
@@ -160,25 +159,21 @@ it('undoes an already chosen final order that contains the excluded participant'
 });
 
 it('keeps proposals that do not contain the excluded participant', function () {
-    $otherProduct = productWithTier($this->group, packageAmount: 1, priceCents: 500, step: 1);
+    $otherProduct = productWithTier($this->group, packageAmount: 1, priceCents: 500, portion: 1);
     CartItem::factory()->for($this->round)->exact(2)->create(['user_id' => $this->anna->id, 'product_id' => $otherProduct->id]);
 
     $onlyAnna = OrderProposal::create([
         'round_id' => $this->round->id,
         'proposed_by_user_id' => $this->lead->id,
         'title' => 'Nur Anna',
-        'status' => ProposalStatus::Draft,
+        'status' => ProposalStatus::Published,
     ]);
-    app(ProposalBuilder::class)->createItem(
-        $onlyAnna,
-        $otherProduct,
-        PackageSpec::fromTier($otherProduct->priceTiers->first()),
-        $this->round->cartItems()->where('product_id', $otherProduct->id)->get(),
-    );
+    $item = $onlyAnna->items()->create(['product_id' => $otherProduct->id, 'total_price_cents' => 1000]);
+    $item->allocations()->create(['user_id' => $this->anna->id, 'quantity' => 2, 'share_cents' => 1000]);
 
     $this->exclusion->exclude($this->round, $this->ben, 'Blockiert', $this->lead);
 
-    expect($onlyAnna->fresh()->status)->toBe(ProposalStatus::Draft);
+    expect($onlyAnna->fresh()->status)->toBe(ProposalStatus::Published);
 });
 
 it('never excludes the lead and always needs a reason', function () {
@@ -193,7 +188,7 @@ it('excludes only while a new proposal is prepared, before the payment phase', f
     $this->round->update(['phase' => $phase]);
 
     expect(fn () => $this->exclusion->exclude($this->round, $this->ben, 'Zu spät', $this->lead))
-        ->toThrow(ValidationException::class, 'Ausschließen geht nur, während ein neuer Vorschlag vorbereitet wird — in der Verhandlungs- oder Bestätigungsphase.');
+        ->toThrow(ValidationException::class, 'Ausschließen geht nur, während ein neuer Vorschlag vorbereitet wird — in der Anpassungs- oder Bestätigungsphase.');
 })->with([
     'shopping' => RoundPhase::Shopping,
     'payment' => RoundPhase::Payment,

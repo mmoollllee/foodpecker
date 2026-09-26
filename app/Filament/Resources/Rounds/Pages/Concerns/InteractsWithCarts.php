@@ -7,12 +7,16 @@ use App\Enums\RoundPhase;
 use App\Filament\Resources\Rounds\Schemas\CartItemForm;
 use App\Models\CartItem;
 use App\Models\Product;
+use App\Models\Round;
 use App\Models\User;
+use App\Services\Estimates\PriceEstimator;
+use App\Services\Estimates\RoundEstimate;
 use App\Services\Rounds\CartService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 
 /**
@@ -22,6 +26,8 @@ use Filament\Support\Icons\Heroicon;
  */
 trait InteractsWithCarts
 {
+    protected ?RoundEstimate $cartEstimate = null;
+
     /**
      * Adds a product nobody has in the cart yet — everything else is a
      * click into the carts table.
@@ -55,6 +61,10 @@ trait InteractsWithCarts
                     ->all()),
                 CartItemForm::productCard(),
                 ...CartItemForm::quantityFields(),
+                CartItemForm::estimateHint(
+                    fn (): Round => $this->getRound(),
+                    fn (Get $get): int => $this->canManage() && filled($get('user_id')) ? (int) $get('user_id') : $this->currentUser()->id,
+                ),
                 CartItemForm::preferredTierField(),
                 CartItemForm::notesField(),
             ])
@@ -73,6 +83,14 @@ trait InteractsWithCarts
                     Notification::make()->title('Artikel im Warenkorb gespeichert.')->success()->send();
                 }
             });
+    }
+
+    /**
+     * What the carts would cost if the round were ordered now.
+     */
+    public function cartEstimate(): RoundEstimate
+    {
+        return $this->cartEstimate ??= app(PriceEstimator::class)->estimate($this->getRound());
     }
 
     /**
@@ -106,10 +124,14 @@ trait InteractsWithCarts
                     'quantity_mode' => $item->quantity_mode->value,
                 ];
             })
-            ->schema([
+            ->schema(fn (array $arguments): array => [
                 Hidden::make('product_id'),
                 CartItemForm::productCard(),
                 ...CartItemForm::quantityFields(),
+                CartItemForm::estimateHint(
+                    fn (): Round => $this->getRound(),
+                    fn (): ?int => $this->cartOwnerFromArguments($arguments)?->id,
+                ),
                 CartItemForm::preferredTierField(),
                 CartItemForm::notesField(),
             ])

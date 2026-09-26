@@ -7,8 +7,8 @@ beforeEach(function () {
     $this->seed(DemoSeeder::class);
 });
 
-it('rendert die Product-Card mit Hersteller, Kategorie und Preisstaffeln', function () {
-    $reis = Product::with('manufacturer', 'priceTiers')
+it('shows supplier, category, distribution and packages on the product card', function () {
+    $reis = Product::with('supplier', 'priceTiers')
         ->where('name', 'Bio Basmati Reis')
         ->firstOrFail();
 
@@ -22,15 +22,15 @@ it('rendert die Product-Card mit Hersteller, Kategorie und Preisstaffeln', funct
     expect($html)->toContain('Bio Basmati Reis')
         ->toContain('Spielberger Mühle')
         ->toContain('Getreide')           // Kategorie
-        ->toContain('Mengenstaffel')       // Verpackungs-Strategie
+        ->toContain('in Portionen zu 0,5 kg')
         ->toContain('10 kg Sack')
         ->toContain('25 kg Sack')
         ->toContain('50 kg Sack')
-        ->toContain('teilbar');
+        ->toContain('Art.-Nr. SM-BAS-25');
 });
 
 it('zeigt im Compact-Modus keine Preisstaffeln', function () {
-    $reis = Product::with('manufacturer', 'priceTiers')
+    $reis = Product::with('supplier', 'priceTiers')
         ->where('name', 'Bio Basmati Reis')
         ->firstOrFail();
 
@@ -52,8 +52,8 @@ it('rendert nichts wenn product null ist', function () {
     expect(trim($html))->toBe('');
 });
 
-it('hat passende Badges für nicht-teilbare Produkte', function () {
-    $spaghetti = Product::with('manufacturer', 'priceTiers')
+it('shows products that go out in whole packages as such', function () {
+    $spaghetti = Product::with('supplier', 'priceTiers')
         ->where('name', 'Spaghetti N. 5 (Bronzeziehung)')
         ->firstOrFail();
 
@@ -61,7 +61,6 @@ it('hat passende Badges für nicht-teilbare Produkte', function () {
         'product' => $spaghetti,
     ])->render();
 
-    expect($html)->toContain('nicht teilbar')
-        ->toContain('Mehrere Größen, nicht teilbar')
+    expect($html)->toContain('nur ganze Packungen')
         ->toContain('Teigwaren');
 });

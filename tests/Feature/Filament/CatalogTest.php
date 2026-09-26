@@ -3,14 +3,14 @@
 use App\Enums\GroupRole;
 use App\Enums\Visibility;
 use App\Filament\Pages\Tenancy\EditGroupProfile;
-use App\Filament\Resources\Manufacturers\Pages\ManageManufacturers;
 use App\Filament\Resources\Products\Pages\ManageProducts;
 use App\Filament\Resources\Products\Schemas\ProductForm;
+use App\Filament\Resources\Suppliers\Pages\ManageSuppliers;
 use App\Models\CartItem;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\Product;
 use App\Models\Round;
+use App\Models\Supplier;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Repeater;
@@ -24,9 +24,9 @@ beforeEach(function () {
     $this->participant = User::factory()->create();
     $this->group->members()->attach($this->participant->id, ['role' => GroupRole::Participant->value]);
 
-    $this->manufacturer = Manufacturer::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Public]);
+    $this->supplier = Supplier::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Public]);
     $this->product = productWithTier($this->group);
-    $this->product->update(['manufacturer_id' => $this->manufacturer->id, 'visibility' => Visibility::Public]);
+    $this->product->update(['supplier_id' => $this->supplier->id, 'visibility' => Visibility::Public]);
 });
 
 it('archives ordered products instead of deleting them', function () {
@@ -82,25 +82,26 @@ it('keeps participants out of catalog changes and group settings', function () {
         ->assertActionHidden('create')
         ->assertActionHidden(TestAction::make('edit')->table($this->product));
 
-    Livewire::test(ManageManufacturers::class)
+    Livewire::test(ManageSuppliers::class)
         ->assertActionHidden('create')
-        ->assertActionHidden(TestAction::make('edit')->table($this->manufacturer));
+        ->assertActionHidden(TestAction::make('edit')->table($this->supplier));
 
     expect(EditGroupProfile::canView($this->group))->toBeFalse();
 });
 
-it('only allows public products of public manufacturers', function () {
+it('only allows public products of public suppliers', function () {
     $undoRepeaterFake = Repeater::fake();
-    $private = Manufacturer::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Private]);
+    $private = Supplier::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Private]);
     actingInGroup($this->owner, $this->group);
 
     $data = [
-        'manufacturer_id' => $private->id,
+        'supplier_id' => $private->id,
         'name' => 'Hofkäse',
         'unit' => 'kg',
         'visibility' => Visibility::Public->value,
-        'packaging_strategy' => 'bulk_weighable',
-        'priceTiers' => [['label' => '5 kg Laib', 'package_amount' => 5, 'price_cents' => '42,50', 'min_order_packages' => 1, 'is_divisible' => true, 'divisible_step' => 0.5]],
+        'is_portioned' => '1',
+        'portion_size' => 0.5,
+        'priceTiers' => [['label' => '5 kg Laib', 'package_amount' => 5, 'price_cents' => '42,50', 'min_order_packages' => 1]],
     ];
 
     Livewire::test(ManageProducts::class)
@@ -115,46 +116,83 @@ it('only allows public products of public manufacturers', function () {
 
     expect($product->group_id)->toBe($this->group->id)
         ->and($product->created_by_user_id)->toBe($this->owner->id)
+        ->and((float) $product->portion_size)->toBe(0.5)
         ->and($product->priceTiers()->first()->price_cents)->toBe(4250)
         ->and(ProductForm::prepareForSave($data)['visibility'])->toBe(Visibility::Private->value);
 
     $undoRepeaterFake();
 });
 
-it('keeps a manufacturer public while other groups order from it', function () {
-    $otherOwner = User::factory()->create();
-    $otherGroup = Group::factory()->create(['owner_id' => $otherOwner->id]);
-    Product::factory()->create(['group_id' => $otherGroup->id, 'manufacturer_id' => $this->manufacturer->id]);
-
+it('saves the portion size chosen in the product form — or none for whole packages', function () {
+    $undoRepeaterFake = Repeater::fake();
     actingInGroup($this->owner, $this->group);
+    $tiers = [['label' => '25 kg Sack', 'package_amount' => 25, 'price_cents' => '55,00', 'min_order_packages' => 1]];
 
-    Livewire::test(ManageManufacturers::class)
-        ->callAction(TestAction::make('edit')->table($this->manufacturer), data: ['visibility' => Visibility::Private->value])
-        ->assertHasActionErrors(['visibility']);
+    Livewire::test(ManageProducts::class)
+        ->mountAction('create')
+        ->fillForm(['supplier_id' => $this->supplier->id, 'name' => 'Grünkern', 'unit' => 'kg', 'visibility' => Visibility::Private->value, 'is_portioned' => '1', 'priceTiers' => $tiers])
+        ->assertFormFieldVisible('portion_size')
+        ->fillForm(['portion_size' => 0.25])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
 
-    expect($this->manufacturer->fresh()->visibility)->toBe(Visibility::Public);
+    Livewire::test(ManageProducts::class)
+        ->callAction('create', data: ['supplier_id' => $this->supplier->id, 'name' => 'Spaghetti', 'unit' => 'kg', 'visibility' => Visibility::Private->value, 'is_portioned' => '0', 'priceTiers' => $tiers])
+        ->assertHasNoActionErrors();
+
+    expect((float) Product::where('name', 'Grünkern')->value('portion_size'))->toBe(0.25)
+        ->and(Product::where('name', 'Spaghetti')->value('portion_size'))->toBeNull();
+
+    $undoRepeaterFake();
 });
 
-it('keeps a manufacturer of a dissolved group public while groups order from it', function () {
-    $otherOwner = User::factory()->create();
-    $otherGroup = Group::factory()->create(['owner_id' => $otherOwner->id]);
-    $this->manufacturer->forceFill(['group_id' => null])->saveQuietly();
-    Product::factory()->create(['group_id' => $otherGroup->id, 'manufacturer_id' => $this->manufacturer->id, 'visibility' => Visibility::Public]);
-
+it('creates a new supplier right from editing a product', function () {
+    $product = productWithTier($this->group);
     actingInGroup($this->owner, $this->group);
 
-    Livewire::test(ManageManufacturers::class)
-        ->callAction(TestAction::make('edit')->table($this->manufacturer), data: ['visibility' => Visibility::Private->value])
-        ->assertHasActionErrors(['visibility']);
+    Livewire::test(ManageProducts::class)
+        ->mountAction([TestAction::make('edit')->table($product), TestAction::make('createOption')->schemaComponent('supplier_id')])
+        ->fillForm(['name' => 'Neuer Hof', 'visibility' => Visibility::Private->value])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
 
-    expect($this->manufacturer->fresh()->visibility)->toBe(Visibility::Public);
+    expect(Supplier::where('name', 'Neuer Hof')->exists())->toBeTrue();
 });
 
-it('makes the products of a manufacturer private together with it', function () {
+it('keeps a supplier public while other groups order from it', function () {
+    $otherOwner = User::factory()->create();
+    $otherGroup = Group::factory()->create(['owner_id' => $otherOwner->id]);
+    Product::factory()->create(['group_id' => $otherGroup->id, 'supplier_id' => $this->supplier->id]);
+
     actingInGroup($this->owner, $this->group);
 
-    Livewire::test(ManageManufacturers::class)
-        ->callAction(TestAction::make('edit')->table($this->manufacturer), data: ['visibility' => Visibility::Private->value])
+    Livewire::test(ManageSuppliers::class)
+        ->callAction(TestAction::make('edit')->table($this->supplier), data: ['visibility' => Visibility::Private->value])
+        ->assertHasActionErrors(['visibility']);
+
+    expect($this->supplier->fresh()->visibility)->toBe(Visibility::Public);
+});
+
+it('keeps a supplier of a dissolved group public while groups order from it', function () {
+    $otherOwner = User::factory()->create();
+    $otherGroup = Group::factory()->create(['owner_id' => $otherOwner->id]);
+    $this->supplier->forceFill(['group_id' => null])->saveQuietly();
+    Product::factory()->create(['group_id' => $otherGroup->id, 'supplier_id' => $this->supplier->id, 'visibility' => Visibility::Public]);
+
+    actingInGroup($this->owner, $this->group);
+
+    Livewire::test(ManageSuppliers::class)
+        ->callAction(TestAction::make('edit')->table($this->supplier), data: ['visibility' => Visibility::Private->value])
+        ->assertHasActionErrors(['visibility']);
+
+    expect($this->supplier->fresh()->visibility)->toBe(Visibility::Public);
+});
+
+it('makes the products of a supplier private together with it', function () {
+    actingInGroup($this->owner, $this->group);
+
+    Livewire::test(ManageSuppliers::class)
+        ->callAction(TestAction::make('edit')->table($this->supplier), data: ['visibility' => Visibility::Private->value])
         ->assertHasNoActionErrors();
 
     expect($this->product->fresh()->visibility)->toBe(Visibility::Private);

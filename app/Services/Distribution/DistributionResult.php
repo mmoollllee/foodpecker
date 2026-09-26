@@ -2,41 +2,60 @@
 
 namespace App\Services\Distribution;
 
+/**
+ * The packages to order for a product and who gets how much of them.
+ */
 class DistributionResult
 {
+    private const EPSILON = 0.001;
+
     /**
      * @param  array<int, AllocationLine>  $allocations
      * @param  array<int, string>  $notes
+     * @param  float  $overhang  Ordered, but nobody wants it within their maximum — paid by all.
+     * @param  float  $shortfall  Handed out beyond what is ordered — the order can't go out like this.
      */
     public function __construct(
-        public readonly int $packagesOrdered,
-        public readonly float $totalQuantity,
-        public readonly int $totalPriceCents,
+        public readonly PackageMix $mix,
         public readonly array $allocations,
-        public readonly bool $feasible,
         public readonly array $notes = [],
-        public readonly float $unallocatedQuantity = 0.0,
+        public readonly float $overhang = 0.0,
+        public readonly float $shortfall = 0.0,
     ) {}
+
+    public function totalQuantity(): float
+    {
+        return $this->mix->totalAmount();
+    }
+
+    public function totalPriceCents(): int
+    {
+        return $this->mix->totalPriceCents();
+    }
 
     public function sumAllocated(): float
     {
-        $sum = 0.0;
-        foreach ($this->allocations as $a) {
-            $sum += $a->allocatedQuantity;
-        }
-
-        return $sum;
+        return array_sum(array_map(fn (AllocationLine $line): float => $line->allocatedQuantity, $this->allocations));
     }
 
-    public function unfulfilledCount(): int
+    public function allocationFor(int $userId): ?AllocationLine
     {
-        $n = 0;
-        foreach ($this->allocations as $a) {
-            if ($a->unfulfilled) {
-                $n++;
+        foreach ($this->allocations as $line) {
+            if ($line->userId === $userId) {
+                return $line;
             }
         }
 
-        return $n;
+        return null;
+    }
+
+    /**
+     * Everybody gets what they wished for and nothing is left over.
+     */
+    public function fits(): bool
+    {
+        return $this->overhang <= self::EPSILON
+            && $this->shortfall <= self::EPSILON
+            && collect($this->allocations)->every(fn (AllocationLine $line): bool => ! $line->unfulfilled);
     }
 }

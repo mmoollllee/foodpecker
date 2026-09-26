@@ -2,30 +2,26 @@
 
 namespace App\Models;
 
-use App\Services\Distribution\PackageSpec;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
 /**
- * One position of an order proposal. The package data (label, size,
- * negotiated price, divisibility) is a snapshot, so the proposal stays
- * valid when the product's price tiers change later on.
+ * One position of an order proposal: a product, the packages to order of
+ * it (possibly several sizes) and who gets how much. Package data is a
+ * snapshot, so the proposal stays valid when the catalog changes later.
  */
 class ProposalItem extends Model
 {
+    private const EPSILON = 0.001;
+
     protected $fillable = [
         'proposal_id',
         'product_id',
-        'price_tier_id',
-        'tier_label',
-        'package_amount',
-        'package_price_cents',
-        'is_divisible',
-        'divisible_step',
-        'min_order_packages',
-        'packages_ordered',
+        'portion_size',
+        'rounding_step',
+        'packages_fixed',
         'total_price_cents',
         'notes',
     ];
@@ -33,12 +29,9 @@ class ProposalItem extends Model
     protected function casts(): array
     {
         return [
-            'package_amount' => 'decimal:3',
-            'package_price_cents' => 'integer',
-            'is_divisible' => 'boolean',
-            'divisible_step' => 'decimal:3',
-            'min_order_packages' => 'integer',
-            'packages_ordered' => 'integer',
+            'portion_size' => 'decimal:3',
+            'rounding_step' => 'decimal:3',
+            'packages_fixed' => 'boolean',
             'total_price_cents' => 'integer',
         ];
     }
@@ -53,9 +46,9 @@ class ProposalItem extends Model
         return $this->belongsTo(Product::class)->withTrashed();
     }
 
-    public function priceTier(): BelongsTo
+    public function packages(): HasMany
     {
-        return $this->belongsTo(PriceTier::class);
+        return $this->hasMany(ProposalItemPackage::class)->orderByDesc('package_amount');
     }
 
     public function allocations(): HasMany
@@ -68,19 +61,86 @@ class ProposalItem extends Model
         return $this->hasMany(ProposalVote::class);
     }
 
-    public function packageLabel(): string
+    public function isPortioned(): bool
     {
-        return $this->tier_label ?? $this->priceTier?->label ?? '—';
+        return $this->portion_size !== null && (float) $this->portion_size > 0;
+    }
+
+    /**
+     * Whether an amount comes in whole portions of this position.
+     */
+    public function isWholePortions(float $quantity): bool
+    {
+        if (! $this->isPortioned()) {
+            return true;
+        }
+
+        $portions = $quantity / (float) $this->portion_size;
+
+        return abs($portions - round($portions)) < 0.0001;
     }
 
     public function totalQuantity(): float
     {
-        return (float) $this->package_amount * $this->packages_ordered;
+        return (float) $this->packages->sum(fn (ProposalItemPackage $package): float => $package->totalAmount());
+    }
+
+    public function allocatedQuantity(): float
+    {
+        return (float) $this->allocations->sum(fn (ProposalAllocation $allocation): float => (float) $allocation->quantity);
     }
 
     /**
-     * Users who receive a share of this item — only their votes decide
-     * whether the item is approved.
+     * Ordered, but nobody wants it within their maximum — paid by all.
+     */
+    public function overhang(): float
+    {
+        return max(0.0, $this->totalQuantity() - $this->allocatedQuantity());
+    }
+
+    /**
+     * Handed out beyond what is ordered — then the proposal can't go out.
+     */
+    public function shortfall(): float
+    {
+        return max(0.0, $this->allocatedQuantity() - $this->totalQuantity());
+    }
+
+    /**
+     * Why the proposal can't be put up for a vote because of this item.
+     */
+    public function blockingProblem(): ?string
+    {
+        $name = $this->product?->name ?? 'Eine Position';
+
+        if ($this->packages->isEmpty()) {
+            return "{$name}: Es ist keine Gebindegröße lieferbar.";
+        }
+
+        if ($this->shortfall() > self::EPSILON) {
+            return "{$name}: Es ist mehr verteilt als bestellt.";
+        }
+
+        if ($this->allocatedQuantity() <= self::EPSILON) {
+            return "{$name}: Niemand bekommt etwas von den bestellten Gebinden.";
+        }
+
+        return null;
+    }
+
+    /**
+     * E.g. "1 × 10 kg Sack, 2 × 1 kg Tüte".
+     */
+    public function describePackages(): string
+    {
+        return $this->packages
+            ->map(fn (ProposalItemPackage $package): string => $package->count.' × '.$package->label)
+            ->implode(', ') ?: '—';
+    }
+
+    /**
+     * Everybody who ordered the product decides on it — also when the
+     * proposal gives them nothing, so nobody can be left out silently.
      *
      * @return Collection<int, int>
      */
@@ -89,22 +149,24 @@ class ProposalItem extends Model
         $allocations = $this->relationLoaded('allocations') ? $this->allocations : $this->allocations()->get();
 
         return $allocations
-            ->filter(fn (ProposalAllocation $allocation): bool => (float) $allocation->quantity > 0)
             ->map(fn (ProposalAllocation $allocation): int => (int) $allocation->user_id)
             ->unique()
             ->values();
     }
 
-    public function toPackageSpec(): PackageSpec
+    /**
+     * Users who receive something of this item.
+     *
+     * @return Collection<int, int>
+     */
+    public function receiverIds(): Collection
     {
-        return new PackageSpec(
-            label: $this->packageLabel(),
-            packageAmount: (float) $this->package_amount,
-            priceCents: (int) $this->package_price_cents,
-            isDivisible: (bool) $this->is_divisible,
-            divisibleStep: $this->divisible_step !== null ? (float) $this->divisible_step : null,
-            minOrderPackages: (int) $this->min_order_packages,
-            priceTierId: $this->price_tier_id,
-        );
+        $allocations = $this->relationLoaded('allocations') ? $this->allocations : $this->allocations()->get();
+
+        return $allocations
+            ->filter(fn (ProposalAllocation $allocation): bool => (float) $allocation->quantity > 0)
+            ->map(fn (ProposalAllocation $allocation): int => (int) $allocation->user_id)
+            ->unique()
+            ->values();
     }
 }

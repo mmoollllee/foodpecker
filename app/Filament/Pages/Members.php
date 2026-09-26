@@ -380,7 +380,11 @@ class Members extends Page implements HasActions, HasSchemas
         return $tenant;
     }
 
-    public function getViewData(): array
+    /**
+     * Open invitations — and with them the links that let anybody join —
+     * only reach people who may invite.
+     */
+    protected function getViewData(): array
     {
         $group = $this->getGroup();
         $canInvite = $this->currentUser()->can('invite', $group);
@@ -392,7 +396,7 @@ class Members extends Page implements HasActions, HasSchemas
             'pendingOwner' => $group->pendingOwner,
             'members' => $members,
             'householdSummary' => $this->householdSummary($members),
-            'invitations' => $group->invitations()->whereNull('accepted_at')->latest()->get(),
+            'invitations' => $canInvite ? $group->invitations()->whereNull('accepted_at')->latest()->get() : collect(),
             'canInvite' => $canInvite,
             'activities' => $group->activities()
                 ->with('user')

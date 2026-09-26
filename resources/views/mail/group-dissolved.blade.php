@@ -5,7 +5,7 @@ Hallo,
 
 {{ $dissolvedBy->fullName() }} hat die Foodpecker-Gruppe **{{ $groupName }}** aufgelöst. Deine Mitgliedschaft und die Bestellrunden der Gruppe wurden gelöscht.
 
-Hersteller und Produkte, die die Gruppe mit allen geteilt hat, bleiben für die anderen Gruppen erhalten — ohne Bezug zu euch.
+Lieferanten und Produkte, die die Gruppe mit allen geteilt hat, bleiben für die anderen Gruppen erhalten — ohne Bezug zu euch.
 
 Dein Foodpecker-Konto bleibt bestehen: Du kannst dich einer anderen Gruppe anschließen oder selbst eine gründen.
 

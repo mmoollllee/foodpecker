@@ -19,8 +19,6 @@ class PriceTierFactory extends Factory
             'package_amount' => 25,
             'min_order_packages' => 1,
             'price_cents' => 5000,
-            'is_divisible' => true,
-            'divisible_step' => 0.5,
             'sort_order' => 1,
         ];
     }
@@ -31,14 +29,6 @@ class PriceTierFactory extends Factory
             'package_amount' => $amount,
             'price_cents' => $priceCents,
             'label' => $label ?? rtrim(rtrim(number_format($amount, 3, ',', ''), '0'), ',').' kg',
-        ]);
-    }
-
-    public function indivisible(): static
-    {
-        return $this->state([
-            'is_divisible' => false,
-            'divisible_step' => null,
         ]);
     }
 }

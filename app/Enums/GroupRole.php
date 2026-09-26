@@ -42,7 +42,7 @@ enum GroupRole: string implements HasColor, HasLabel
                 'group:update',
                 'group:invite',
                 'group:manage-members',
-                'manufacturer:*',
+                'supplier:*',
                 'product:*',
                 'round:*',
                 'cart:*',
@@ -58,7 +58,7 @@ enum GroupRole: string implements HasColor, HasLabel
                 'note:create',
                 'attachment:create',
                 'round:view',
-                'manufacturer:view',
+                'supplier:view',
                 'product:view',
             ],
         };

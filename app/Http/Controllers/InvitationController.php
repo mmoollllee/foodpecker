@@ -15,11 +15,14 @@ class InvitationController extends Controller
     public const SESSION_KEY = 'foodpecker.invitation_token';
 
     /**
-     * Accepts an invitation link:
+     * Accepts an invitation link. Whoever holds the link may join:
      *
-     *   - logged in with the invited address → join the group
-     *   - not logged in, account exists → log in, then come back here
-     *   - not logged in, no account → register with the address prefilled
+     *   - logged in → join the group; an account under another address
+     *     takes the invitation over — unless it belongs to the group
+     *     already: then the link stays open for the person it was sent to
+     *   - not logged in, account with the invited address → log in, then come back here
+     *   - otherwise → register (the address is prefilled, but may be changed)
+     *     or log in with an existing account, then come back here
      */
     public function accept(Request $request, string $token): RedirectResponse
     {
@@ -29,21 +32,34 @@ class InvitationController extends Controller
             return $this->fail('Der Einladungs-Link ist ungültig. Bitte frag nach einer neuen Einladung.');
         }
 
-        if ($invitation->isExpired() && ! $invitation->isAccepted()) {
+        $user = Auth::user();
+
+        if ($user instanceof User && $invitation->group->hasMember($user)) {
+            if (mb_strtolower($invitation->email) === mb_strtolower($user->email)) {
+                $invitation->accept($user);
+            } elseif (! $invitation->isAccepted()) {
+                Notification::make()
+                    ->title('Du bist schon Mitglied der Gruppe „'.$invitation->group->name.'“.')
+                    ->body('Die Einladung an '.$invitation->email.' bleibt offen.')
+                    ->info()
+                    ->send();
+            }
+
+            $request->session()->forget(self::SESSION_KEY);
+
+            return redirect(Filament::getPanel('global')->getUrl($invitation->group));
+        }
+
+        if ($invitation->isAccepted()) {
+            return $this->fail('Diese Einladung wurde bereits angenommen. Bitte frag nach einer neuen.');
+        }
+
+        if ($invitation->isExpired()) {
             return $this->fail('Diese Einladung ist abgelaufen — bitte frag nach einer neuen.');
         }
 
-        $user = Auth::user();
-
         if ($user instanceof User) {
-            if (mb_strtolower($user->email) !== mb_strtolower($invitation->email)) {
-                return $this->fail(sprintf(
-                    'Diese Einladung ist an %s adressiert. Bitte melde dich ab und mit dieser Adresse an.',
-                    $invitation->email,
-                ));
-            }
-
-            $invitation->accept($user);
+            $invitation->acceptAs($user);
             $request->session()->forget(self::SESSION_KEY);
 
             Notification::make()
@@ -54,24 +70,14 @@ class InvitationController extends Controller
             return redirect(Filament::getPanel('global')->getUrl($invitation->group));
         }
 
-        if ($invitation->isAccepted()) {
-            Notification::make()
-                ->title('Du hast diese Einladung bereits angenommen — bitte melde dich an.')
-                ->info()
-                ->send();
-
-            return redirect()->route('filament.global.auth.login');
-        }
-
         $request->session()->put(self::SESSION_KEY, $token);
+        redirect()->setIntendedUrl($request->fullUrl());
 
         $hasAccount = User::query()
             ->whereRaw('lower(email) = ?', [mb_strtolower($invitation->email)])
             ->exists();
 
         if ($hasAccount) {
-            redirect()->setIntendedUrl($request->fullUrl());
-
             Notification::make()
                 ->title('Bitte melde dich an, um der Gruppe „'.$invitation->group->name.'“ beizutreten.')
                 ->info()

@@ -1,10 +1,10 @@
 <?php
 
 use App\Filament\Pages\Members;
-use App\Filament\Resources\Manufacturers\Pages\ManageManufacturers;
 use App\Filament\Resources\Products\Pages\ManageProducts;
 use App\Filament\Resources\Rounds\Pages\ListRounds;
 use App\Filament\Resources\Rounds\Pages\ViewRound;
+use App\Filament\Resources\Suppliers\Pages\ManageSuppliers;
 use App\Models\Round;
 use App\Models\User;
 use Database\Seeders\DemoSeeder;
@@ -33,8 +33,8 @@ it('aktive Runde lässt sich als Dashboard öffnen', function () {
         ->assertSee('Vorschlag B');
 });
 
-it('Hersteller-Seite zeigt öffentliche und private', function () {
-    Livewire::test(ManageManufacturers::class)
+it('Lieferanten-Seite zeigt öffentliche und private', function () {
+    Livewire::test(ManageSuppliers::class)
         ->assertOk()
         ->assertSee('Spielberger Mühle')
         ->assertSee('Hofladen Brandenburg');

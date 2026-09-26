@@ -2,10 +2,13 @@
 
 namespace App\Services\Rounds;
 
+use App\Enums\ProposalStatus;
 use App\Enums\RoundPhase;
+use App\Models\OrderProposal;
 use App\Models\Payment;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Proposals\ProposalBuilder;
 use App\Services\Proposals\ProposalWorkflow;
 use Illuminate\Validation\ValidationException;
 
@@ -15,6 +18,7 @@ class PhaseTransitioner
         private ConsensusChecker $consensus,
         private ProposalWorkflow $workflow,
         private PriceObservationRecorder $priceObservations,
+        private ProposalBuilder $builder,
     ) {}
 
     /**
@@ -50,6 +54,7 @@ class PhaseTransitioner
             RoundPhase::Finalizing => $round->phase === RoundPhase::Negotiating ? $this->missingForFinalizing($round) : [],
             RoundPhase::Payment => $this->missingForPayment($round),
             RoundPhase::Ordering => $this->missingForOrdering($round),
+            RoundPhase::Pickup => $this->missingForPickup($round),
             default => [],
         };
     }
@@ -106,11 +111,38 @@ class PhaseTransitioner
             'reason' => $reason,
         ]);
 
+        if ($to === RoundPhase::Negotiating) {
+            $this->prepareDraft($round);
+        }
+
         if ($to === RoundPhase::Ordering) {
             $this->priceObservations->record($round);
         }
 
         return $round;
+    }
+
+    /**
+     * The order proposal is drafted as soon as shopping ends; existing
+     * drafts catch up with the carts. Coming back from the vote, the lead
+     * continues with a new version of the proposal that was up for it, so
+     * its corrections stay.
+     */
+    private function prepareDraft(Round $round): void
+    {
+        $drafts = $round->proposals()->where('status', ProposalStatus::Draft->value)->get();
+        $drafts->each(fn (OrderProposal $draft) => $this->builder->recalculate($draft));
+
+        if ($drafts->contains('proposed_by_user_id', $round->lead_user_id)) {
+            return;
+        }
+
+        $votedOn = $round->proposals()->openForVoting()->latest('id')->get();
+        $base = $votedOn->firstWhere('proposed_by_user_id', $round->lead_user_id) ?? $votedOn->first();
+
+        $base !== null
+            ? $this->builder->createNewVersion($base, $round->lead)
+            : $this->builder->createFromCarts($round, $round->lead, ['title' => 'Bestellvorschlag']);
     }
 
     /**
@@ -125,15 +157,24 @@ class PhaseTransitioner
             $missing[] = "Es läuft noch die Bestellrunde „{$running->title}“. Eine Gruppe hat immer nur eine laufende Runde — starte diese, sobald die laufende abgeschlossen oder abgebrochen ist.";
         }
 
-        if (! $round->pickupDates()->exists()) {
-            $missing[] = 'Mindestens ein Abholtermin muss angelegt sein.';
-        }
-
         if (blank($round->pickup_location)) {
             $missing[] = 'Abholort muss gesetzt sein.';
         }
 
         return $missing;
+    }
+
+    /**
+     * Pickup dates may be set late, once the delivery date is known — but
+     * nobody can pick up without one.
+     *
+     * @return array<int, string>
+     */
+    private function missingForPickup(Round $round): array
+    {
+        return $round->pickupDates()->exists()
+            ? []
+            : ['Mindestens ein Abholtermin muss angelegt sein — unter „Eckdaten bearbeiten“.'];
     }
 
     /**

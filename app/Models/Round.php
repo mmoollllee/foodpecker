@@ -107,10 +107,27 @@ class Round extends Model
     public function availableProductsForCart(): Builder
     {
         if ($this->availableProducts()->withTrashed()->exists()) {
-            return $this->availableProducts()->getQuery();
+            // Without the explicit select, the pivot's id would overwrite the product's.
+            return $this->availableProducts()->getQuery()->select('products.*');
         }
 
         return Product::visibleTo($this->group);
+    }
+
+    /**
+     * Suppliers asked for prices in this round, with their answer.
+     */
+    public function roundSuppliers(): HasMany
+    {
+        return $this->hasMany(RoundSupplier::class);
+    }
+
+    /**
+     * Package prices and availability the suppliers confirmed for this round.
+     */
+    public function packagePrices(): HasMany
+    {
+        return $this->hasMany(RoundPackagePrice::class);
     }
 
     public function pickupDates(): HasMany

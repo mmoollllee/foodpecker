@@ -35,12 +35,19 @@ class User extends Authenticatable implements FilamentUser, HasAvatar, HasName, 
         'postal_code',
         'city',
         'household_size',
+        'bank_account_holder',
+        'iban',
+        'bic',
         'profile_photo_path',
         'password',
         'current_group_id',
     ];
 
-    protected $hidden = ['password', 'remember_token'];
+    /**
+     * Bank details reach only the people paying a round the person leads —
+     * never with a serialized user.
+     */
+    protected $hidden = ['password', 'remember_token', 'iban', 'bic', 'bank_account_holder'];
 
     protected function casts(): array
     {
@@ -153,5 +160,29 @@ class User extends Authenticatable implements FilamentUser, HasAvatar, HasName, 
         }
 
         return $this->attributes['name'] ?? $this->email;
+    }
+
+    /**
+     * Whether payments for rounds this person leads can go to their account.
+     */
+    public function hasBankDetails(): bool
+    {
+        return filled($this->iban);
+    }
+
+    /**
+     * Whose account it is — the person themselves unless they said otherwise.
+     */
+    public function bankAccountHolderName(): string
+    {
+        return filled($this->bank_account_holder) ? $this->bank_account_holder : $this->fullName();
+    }
+
+    /**
+     * "DE89 3704 0044 0532 0130 00" — in blocks of four, easy to read out.
+     */
+    public function formattedIban(): ?string
+    {
+        return filled($this->iban) ? trim(chunk_split($this->iban, 4, ' ')) : null;
     }
 }

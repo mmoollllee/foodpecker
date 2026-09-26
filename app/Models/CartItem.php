@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ProductUnit;
 use App\Enums\QuantityMode;
 use Database\Factories\CartItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -74,10 +75,10 @@ class CartItem extends Model
         $unit = $this->product?->unitLabel() ?? '';
 
         if ($this->quantity_mode === QuantityMode::Exact) {
-            return static::formatQuantity((float) $this->exact_quantity).' '.$unit;
+            return static::formatAmount((float) $this->exact_quantity, $unit);
         }
 
-        return static::formatQuantity((float) $this->min_quantity).'–'.static::formatQuantity((float) $this->max_quantity).' '.$unit;
+        return static::formatQuantity((float) $this->min_quantity).'–'.static::formatAmount((float) $this->max_quantity, $unit);
     }
 
     /**
@@ -86,5 +87,35 @@ class CartItem extends Model
     public static function formatQuantity(float $quantity): string
     {
         return rtrim(rtrim(number_format($quantity, 3, ',', '.'), '0'), ',');
+    }
+
+    /**
+     * A quantity for an input field: decimal comma, no thousands separator
+     * ("2500", "1,25") — so it reads back as the same number.
+     */
+    public static function toInputString(float $quantity): string
+    {
+        return rtrim(rtrim(number_format($quantity, 3, ',', ''), '0'), ',');
+    }
+
+    /**
+     * A quantity with its unit, e.g. "0,5 kg", "1 Packung" or "3 Packungen".
+     */
+    public static function formatAmount(float $quantity, ?string $unit): string
+    {
+        $label = ProductUnit::tryFromShortLabel($unit ?? '')?->labelFor($quantity) ?? $unit;
+
+        return trim(static::formatQuantity($quantity).' '.$label);
+    }
+
+    /**
+     * From one quantity to another with the unit, e.g. "2–3 Packungen" — or
+     * just one quantity when both are the same.
+     */
+    public static function formatRange(float $min, float $max, ?string $unit): string
+    {
+        return abs($max - $min) < 0.0005
+            ? static::formatAmount($min, $unit)
+            : static::formatQuantity($min).'–'.static::formatAmount($max, $unit);
     }
 }

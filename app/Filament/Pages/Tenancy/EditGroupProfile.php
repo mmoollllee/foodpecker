@@ -139,13 +139,13 @@ class EditGroupProfile extends EditTenantProfile
 
         $deleted[] = $this->counted($preview['members'], 'Mitgliedschaft', 'Mitgliedschaften').' und alle offenen Einladungen — die Konten selbst bleiben bestehen';
 
-        if ($catalog = $this->catalogCount($preview['deleted_products'], $preview['deleted_manufacturers'])) {
+        if ($catalog = $this->catalogCount($preview['deleted_products'], $preview['deleted_suppliers'])) {
             $deleted[] = $catalog.', die nur eure Gruppe nutzt';
         }
 
         $kept = [];
 
-        if ($catalog = $this->catalogCount($preview['kept_products'], $preview['kept_manufacturers'])) {
+        if ($catalog = $this->catalogCount($preview['kept_products'], $preview['kept_suppliers'])) {
             $kept[] = $catalog.', die ihr geteilt habt oder die andere Gruppen schon bestellt haben — sie gehören danach allen Gruppen';
         }
 
@@ -154,11 +154,11 @@ class EditGroupProfile extends EditTenantProfile
         return ['deleted' => $deleted, 'kept' => $kept];
     }
 
-    private function catalogCount(int $products, int $manufacturers): ?string
+    private function catalogCount(int $products, int $suppliers): ?string
     {
         $parts = array_filter([
             $products > 0 ? $this->counted($products, 'Produkt', 'Produkte') : null,
-            $manufacturers > 0 ? $this->counted($manufacturers, 'Hersteller', 'Hersteller') : null,
+            $suppliers > 0 ? $this->counted($suppliers, 'Lieferant', 'Lieferanten') : null,
         ]);
 
         return $parts === [] ? null : implode(' und ', $parts);

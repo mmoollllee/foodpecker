@@ -5,9 +5,11 @@ namespace App\Filament\Resources\Rounds\Pages\Concerns;
 use App\Enums\PaymentStatus;
 use App\Enums\RoundPhase;
 use App\Filament\Forms\Components\MoneyInput;
+use App\Filament\Forms\UserFields;
 use App\Models\Payment;
 use App\Models\Pickup;
 use App\Models\PickupDate;
+use App\Services\Money\GiroCode;
 use App\Services\Money\Money;
 use App\Services\Rounds\RoundUpDonation;
 use Filament\Actions\Action;
@@ -17,8 +19,9 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 
 /**
- * Payments (the lead ticks them off) and pickups (everybody picks a date
- * and may mark their own pickup; the lead may mark anybody's).
+ * Payments (everybody transfers to the lead's account, the lead ticks them
+ * off) and pickups (everybody picks a date and may mark their own pickup;
+ * the lead may mark anybody's).
  */
 trait InteractsWithFulfillment
 {
@@ -163,6 +166,59 @@ trait InteractsWithFulfillment
     }
 
     /**
+     * The lead's own bank details, right where the payments are — they are
+     * saved to the profile.
+     */
+    public function editBankDetailsAction(): Action
+    {
+        return Action::make('editBankDetails')
+            ->label(fn (): string => $this->currentUser()->hasBankDetails() ? 'Bankverbindung ändern' : 'Bankverbindung hinterlegen')
+            ->icon(Heroicon::OutlinedBanknotes)
+            ->color(fn (): string => $this->currentUser()->hasBankDetails() ? 'gray' : 'primary')
+            ->size('sm')
+            ->visible(fn (): bool => $this->getRound()->isLead($this->currentUser())
+                && in_array($this->getRound()->phase, static::$paymentPhases, true))
+            ->modalHeading('Deine Bankverbindung')
+            ->modalDescription('Wer dir seinen Anteil überweist, sieht sie in der Zahlungsphase — mit Verwendungszweck und GiroCode. Ändern kannst du sie auch im Profil.')
+            ->modalWidth('lg')
+            ->modalSubmitActionLabel('Speichern')
+            ->fillForm(fn (): array => $this->currentUser()->only(['iban', 'bank_account_holder', 'bic']))
+            ->schema([
+                UserFields::iban()->required(),
+                UserFields::bankAccountHolder(),
+                UserFields::bic(),
+            ])
+            ->action(function (array $data): void {
+                $this->currentUser()->update($data);
+
+                Notification::make()->title('Bankverbindung gespeichert.')->success()->send();
+                $this->refreshRound();
+            });
+    }
+
+    /**
+     * The GiroCode for a transfer to the lead, as an image — null while the
+     * lead has no bank details. Protected: the browser must not ask for the
+     * code of any payment it likes; the view may call it.
+     */
+    protected function giroCodeFor(Payment $payment): ?string
+    {
+        $lead = $this->getRound()->lead;
+
+        if ($lead === null || ! $lead->hasBankDetails()) {
+            return null;
+        }
+
+        return app(GiroCode::class)->dataUri(
+            $lead->bankAccountHolderName(),
+            (string) $lead->iban,
+            $payment->totalCents(),
+            $payment->transferReference(),
+            $lead->bic,
+        );
+    }
+
+    /**
      * What the lead forwards to the association: the fee of the final
      * order plus everybody's round-up donations.
      *
@@ -235,7 +291,7 @@ trait InteractsWithFulfillment
                     ->label('Wann holst du ab?')
                     ->options(fn (): array => $this->getRound()->pickupDates
                         ->mapWithKeys(fn (PickupDate $date): array => [
-                            $date->id => $date->scheduled_at->translatedFormat('D, d.m.Y H:i').($date->location ? ' · '.$date->location : ''),
+                            $date->id => $date->label().($date->location ? ' · '.$date->location : ''),
                         ])
                         ->all())
                     ->required(),

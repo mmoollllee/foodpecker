@@ -12,5 +12,6 @@
         @if ($phase === $round->phase)
             <x-filament::button tag="a" :href="MyOrders::getUrl()" color="gray" icon="heroicon-o-clipboard-document-list">Meine Bestellungen</x-filament::button>
         @endif
+        <x-foodpecker.action :action="$this->adoptCatalogPricesAction" />
     </x-slot>
 </x-foodpecker.phase-panel>

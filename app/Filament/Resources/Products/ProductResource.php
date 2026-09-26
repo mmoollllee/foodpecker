@@ -2,13 +2,12 @@
 
 namespace App\Filament\Resources\Products;
 
-use App\Enums\PackagingStrategy;
 use App\Enums\ProductCategory;
 use App\Enums\Visibility;
-use App\Filament\Resources\Manufacturers\RelationManagers\ProductsRelationManager;
 use App\Filament\Resources\Products\Pages\ManageProducts;
 use App\Filament\Resources\Products\Pages\ViewProduct;
 use App\Filament\Resources\Products\Schemas\ProductForm;
+use App\Filament\Resources\Suppliers\RelationManagers\ProductsRelationManager;
 use App\Models\Product;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
@@ -61,7 +60,7 @@ class ProductResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->weight('semibold')
-                    ->description(fn (Product $record, HasTable $livewire): ?string => $livewire instanceof ProductsRelationManager ? null : $record->manufacturer?->name),
+                    ->description(fn (Product $record, HasTable $livewire): ?string => $livewire instanceof ProductsRelationManager ? null : $record->supplier?->name),
                 TextColumn::make('category')
                     ->label('Kategorie')
                     ->badge()
@@ -71,9 +70,11 @@ class ProductResource extends Resource
                     ->label('Einh.')
                     ->formatStateUsing(fn (Product $record): string => $record->unitLabel())
                     ->color('gray'),
-                TextColumn::make('packaging_strategy')
-                    ->label('Verpackung')
-                    ->badge(),
+                TextColumn::make('portion_size')
+                    ->label('Verteilung')
+                    ->state(fn (Product $record): string => $record->distributionLabel())
+                    ->color('gray')
+                    ->toggleable(),
                 TextColumn::make('visibility')
                     ->label('Sichtbarkeit')
                     ->badge(),
@@ -84,11 +85,6 @@ class ProductResource extends Resource
                     ->listWithLineBreaks()
                     ->limitList(3)
                     ->expandableLimitedList(),
-                TextColumn::make('estimated_price_cents')
-                    ->label('Richtwert')
-                    ->state(fn (Product $record): ?string => $record->formattedEstimatedPrice())
-                    ->sortable()
-                    ->color('warning'),
                 TextColumn::make('group.name')
                     ->label('Gehört zu')
                     ->placeholder('—')
@@ -105,12 +101,9 @@ class ProductResource extends Resource
                 SelectFilter::make('visibility')
                     ->label('Sichtbarkeit')
                     ->options(Visibility::class),
-                SelectFilter::make('packaging_strategy')
-                    ->label('Verpackung')
-                    ->options(PackagingStrategy::class),
-                SelectFilter::make('manufacturer_id')
-                    ->label('Hersteller')
-                    ->relationship('manufacturer', 'name')
+                SelectFilter::make('supplier_id')
+                    ->label('Lieferant')
+                    ->relationship('supplier', 'name')
                     ->searchable()
                     ->preload()
                     ->hiddenOn(ProductsRelationManager::class),
@@ -142,14 +135,14 @@ class ProductResource extends Resource
                     ->modalDescription('Nur möglich, solange das Produkt nie bestellt wurde.'),
             ])
             ->emptyStateHeading('Noch keine Produkte')
-            ->emptyStateDescription('Lege zuerst Hersteller an, dann die zugehörigen Produkte mit ihren Preisstaffeln.');
+            ->emptyStateDescription('Lege zuerst Lieferanten an, dann die zugehörigen Produkte mit ihren Gebindegrößen.');
     }
 
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
             ->visibleTo(Filament::getTenant())
-            ->with('manufacturer', 'priceTiers');
+            ->with('supplier', 'priceTiers');
     }
 
     /**

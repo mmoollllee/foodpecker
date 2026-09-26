@@ -34,7 +34,7 @@
                             <span class="font-medium">{{ $round->pickup_location }}</span>
                         @endif
                         @foreach ($round->pickupDates as $pickupDate)
-                            <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">📅 {{ $pickupDate->scheduled_at->format('d.m. H:i') }}</span>
+                            <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">📅 {{ $pickupDate->shortLabel() }}</span>
                         @endforeach
                     </div>
                 @endif

@@ -4,16 +4,16 @@ namespace App\Policies;
 
 use App\Models\Attachment;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\Product;
 use App\Models\Round;
+use App\Models\Supplier;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\Model;
 
 /**
  * Documents follow the same sharing rules as notes: round documents stay in
- * the group, documents on shared manufacturers and products are for all.
+ * the group, documents on shared suppliers and products are for all.
  */
 class AttachmentPolicy
 {
@@ -21,7 +21,7 @@ class AttachmentPolicy
     {
         $attachable = $attachment->attachable;
 
-        if (($attachable instanceof Manufacturer || $attachable instanceof Product) && $attachable->isPublic()) {
+        if (($attachable instanceof Supplier || $attachable instanceof Product) && $attachable->isPublic()) {
             return true;
         }
 
@@ -39,7 +39,7 @@ class AttachmentPolicy
         $group = $this->currentGroup();
 
         return $group !== null
-            && ($attachable instanceof Manufacturer || $attachable instanceof Product)
+            && ($attachable instanceof Supplier || $attachable instanceof Product)
             && $user->can('view', $attachable)
             && $user->canInGroup($group, 'attachment:create');
     }

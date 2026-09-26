@@ -18,10 +18,11 @@ class OrderProposal extends Model
     protected $fillable = [
         'round_id',
         'proposed_by_user_id',
+        'based_on_proposal_id',
         'title',
         'status',
         'description',
-        'shipping_cents',
+        'shipping_by_supplier',
         'published_at',
     ];
 
@@ -29,7 +30,7 @@ class OrderProposal extends Model
     {
         return [
             'status' => ProposalStatus::class,
-            'shipping_cents' => 'integer',
+            'shipping_by_supplier' => 'array',
             'published_at' => 'datetime',
         ];
     }
@@ -42,6 +43,14 @@ class OrderProposal extends Model
     public function proposedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'proposed_by_user_id');
+    }
+
+    /**
+     * The proposal this one copies — as a new version or counter-proposal.
+     */
+    public function basedOn(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'based_on_proposal_id');
     }
 
     public function items(): HasMany
@@ -90,6 +99,43 @@ class OrderProposal extends Model
     public function isProposedBy(User $user): bool
     {
         return $this->proposed_by_user_id === $user->getKey();
+    }
+
+    /**
+     * Shipping of a supplier as recorded for this proposal — for drafts the
+     * round's current value, frozen once the proposal is up for a vote.
+     */
+    public function shippingCentsFor(int $supplierId): int
+    {
+        return (int) ($this->shipping_by_supplier[$supplierId] ?? $this->shipping_by_supplier[(string) $supplierId] ?? 0);
+    }
+
+    /**
+     * Whether the supplier's shipping is known — 0 means free shipping.
+     */
+    public function hasShippingFor(int $supplierId): bool
+    {
+        return array_key_exists($supplierId, $this->shipping_by_supplier ?? []);
+    }
+
+    public function totalShippingCents(): int
+    {
+        return (int) array_sum(array_map('intval', $this->shipping_by_supplier ?? []));
+    }
+
+    /**
+     * Users who decide on at least one position: everybody who ordered one
+     * of its products.
+     *
+     * @return Collection<int, int>
+     */
+    public function stakeholderIds(): Collection
+    {
+        return $this->allocations()
+            ->pluck('proposal_allocations.user_id')
+            ->map(fn ($userId): int => (int) $userId)
+            ->unique()
+            ->values();
     }
 
     /**

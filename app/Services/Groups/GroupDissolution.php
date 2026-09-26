@@ -9,13 +9,13 @@ use App\Models\Activity;
 use App\Models\Attachment;
 use App\Models\CartItem;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\Note;
 use App\Models\OrderProposal;
 use App\Models\PriceObservation;
 use App\Models\Product;
 use App\Models\ProposalItem;
 use App\Models\Round;
+use App\Models\Supplier;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -31,7 +31,7 @@ use Throwable;
  *   - rounds, memberships and invitations go away, and so does everything
  *     only the group could see: private catalog entries, notes, documents
  *     and price history
- *   - shared manufacturers and products stay and belong to the community
+ *   - shared suppliers and products stay and belong to the community
  *     afterwards — moderators of any group may maintain them
  *   - private products another group already ordered stay archived, so
  *     those orders keep working
@@ -76,23 +76,23 @@ class GroupDissolution
     /**
      * What dissolving would do — shown before the owner confirms.
      *
-     * @return array{rounds: int, members: int, deleted_products: int, kept_products: int, deleted_manufacturers: int, kept_manufacturers: int}
+     * @return array{rounds: int, members: int, deleted_products: int, kept_products: int, deleted_suppliers: int, kept_suppliers: int}
      */
     public function preview(Group $group): array
     {
         $products = $this->ownedProducts($group);
         $deletedProductIds = $products->reject(fn (Product $product): bool => $this->mustKeepProduct($product, $group))->modelKeys();
 
-        $manufacturers = $this->ownedManufacturers($group);
-        $deletedManufacturers = $manufacturers->reject(fn (Manufacturer $manufacturer): bool => $this->mustKeepManufacturer($manufacturer, $deletedProductIds))->count();
+        $suppliers = $this->ownedSuppliers($group);
+        $deletedSuppliers = $suppliers->reject(fn (Supplier $supplier): bool => $this->mustKeepSupplier($supplier, $deletedProductIds))->count();
 
         return [
             'rounds' => $this->rounds()->whereBelongsTo($group)->count(),
             'members' => $group->members()->count(),
             'deleted_products' => count($deletedProductIds),
             'kept_products' => $products->count() - count($deletedProductIds),
-            'deleted_manufacturers' => $deletedManufacturers,
-            'kept_manufacturers' => $manufacturers->count() - $deletedManufacturers,
+            'deleted_suppliers' => $deletedSuppliers,
+            'kept_suppliers' => $suppliers->count() - $deletedSuppliers,
         ];
     }
 
@@ -130,15 +130,15 @@ class GroupDissolution
                 $product->forceDelete();
             }
 
-            foreach ($this->ownedManufacturers($group) as $manufacturer) {
-                if ($this->mustKeepManufacturer($manufacturer, $deletedProductIds)) {
-                    $this->releaseToCommunity($manufacturer, $groupName);
+            foreach ($this->ownedSuppliers($group) as $supplier) {
+                if ($this->mustKeepSupplier($supplier, $deletedProductIds)) {
+                    $this->releaseToCommunity($supplier, $groupName);
 
                     continue;
                 }
 
-                $this->deleteAnnotations($manufacturer);
-                $manufacturer->delete();
+                $this->deleteAnnotations($supplier);
+                $supplier->delete();
             }
 
             $this->deletePrivateTraces($group);
@@ -179,22 +179,22 @@ class GroupDissolution
     }
 
     /**
-     * A manufacturer stays while any product still points to it — deleting
+     * A supplier stays while any product still points to it — deleting
      * it would take the products of other groups with it.
      *
      * @param  array<int, int>  $deletedProductIds
      */
-    private function mustKeepManufacturer(Manufacturer $manufacturer, array $deletedProductIds): bool
+    private function mustKeepSupplier(Supplier $supplier, array $deletedProductIds): bool
     {
-        return $manufacturer->isPublic()
-            || $manufacturer->products()->withTrashed()->whereKeyNot($deletedProductIds)->exists();
+        return $supplier->isPublic()
+            || $supplier->products()->withTrashed()->whereKeyNot($deletedProductIds)->exists();
     }
 
     /**
      * Nobody owns the entry anymore. A private product is archived on top:
      * it stays for the orders that use it, but nobody maintains its prices.
      */
-    private function releaseToCommunity(Product|Manufacturer $entry, string $groupName): void
+    private function releaseToCommunity(Product|Supplier $entry, string $groupName): void
     {
         $entry->forceFill(['group_id' => null])->saveQuietly();
 
@@ -212,7 +212,7 @@ class GroupDissolution
      * Notes, documents and the activity stream hang on their record
      * polymorphically, so the database doesn't delete them on its own.
      */
-    private function deleteAnnotations(Round|Product|Manufacturer $record): void
+    private function deleteAnnotations(Round|Product|Supplier $record): void
     {
         $record->notes()->delete();
         $this->deleteAttachments($record->attachments()->getQuery());
@@ -248,7 +248,7 @@ class GroupDissolution
     }
 
     /**
-     * Restricts a note, document or activity query to shared manufacturers
+     * Restricts a note, document or activity query to shared suppliers
      * and products.
      */
     private function onSharedEntry(Builder $query, string $morph): void
@@ -258,8 +258,8 @@ class GroupDissolution
                 ->where("{$morph}_type", (new Product)->getMorphClass())
                 ->whereIn("{$morph}_id", $this->sharedProducts()))
             ->orWhere(fn (Builder $query) => $query
-                ->where("{$morph}_type", (new Manufacturer)->getMorphClass())
-                ->whereIn("{$morph}_id", Manufacturer::query()->where('visibility', Visibility::Public)->select('id')));
+                ->where("{$morph}_type", (new Supplier)->getMorphClass())
+                ->whereIn("{$morph}_id", Supplier::query()->where('visibility', Visibility::Public)->select('id')));
     }
 
     /**
@@ -304,11 +304,11 @@ class GroupDissolution
     }
 
     /**
-     * @return Collection<int, Manufacturer>
+     * @return Collection<int, Supplier>
      */
-    private function ownedManufacturers(Group $group): Collection
+    private function ownedSuppliers(Group $group): Collection
     {
-        return Manufacturer::query()->where('group_id', $group->id)->get();
+        return Supplier::query()->where('group_id', $group->id)->get();
     }
 
     /**

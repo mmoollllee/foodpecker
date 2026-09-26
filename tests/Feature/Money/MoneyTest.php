@@ -48,3 +48,9 @@ it('formats cents for input fields', function () {
         ->and(Money::toInputString(5))->toBe('0,05')
         ->and(Money::toInputString(0))->toBe('0,00');
 });
+
+it('splits cents in proportion without ever giving somebody a negative share', function () {
+    expect(Money::splitProportionally(2, [1, 1, 1, 1]))->toBe([1, 1, 0, 0])
+        ->and(Money::splitProportionally(390, [3700, 3700, 3700, 3700, 3700, 3700, 3700, 100]))->toBe([56, 56, 56, 56, 55, 55, 55, 1])
+        ->and(Money::splitProportionally(100, ['a' => 0, 'b' => 0]))->toBe(['a' => 50, 'b' => 50]);
+});

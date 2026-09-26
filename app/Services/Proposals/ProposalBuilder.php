@@ -7,19 +7,24 @@ use App\Models\CartItem;
 use App\Models\OrderProposal;
 use App\Models\PriceTier;
 use App\Models\Product;
+use App\Models\ProposalAllocation;
 use App\Models\ProposalItem;
+use App\Models\ProposalItemPackage;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Distribution\Demand;
 use App\Services\Distribution\DistributionResult;
 use App\Services\Distribution\Distributor;
-use App\Services\Distribution\PackageSpec;
-use Illuminate\Support\Arr;
+use App\Services\Distribution\PackageOption;
+use App\Services\Rounds\RoundPriceBook;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
- * Turns the carts of a round into order proposals and keeps their items
- * consistent when the lead changes package size, count or price.
+ * Turns the carts of a round into order proposals and keeps drafts in line
+ * with the carts, the suppliers' feedback and the proposer's corrections:
+ * amounts set by hand, fixed package counts and coarser rounding.
  *
  * Only carts of participants who were not excluded are taken into account.
  */
@@ -28,7 +33,7 @@ class ProposalBuilder
     public function __construct(private Distributor $distributor) {}
 
     /**
-     * @param  array{title: string, description?: string|null, shipping_cents?: int|null}  $attributes
+     * @param  array{title: string, description?: string|null}  $attributes
      */
     public function createFromCarts(Round $round, User $proposer, array $attributes): OrderProposal
     {
@@ -37,50 +42,46 @@ class ProposalBuilder
                 'proposed_by_user_id' => $proposer->id,
                 'title' => $attributes['title'],
                 'description' => $attributes['description'] ?? null,
-                'shipping_cents' => $attributes['shipping_cents'] ?? 0,
                 'status' => ProposalStatus::Draft,
             ]);
 
-            $cartItemsByProduct = $round->activeCartItems()
-                ->with(['product.priceTiers', 'preferredTier', 'user'])
-                ->get()
-                ->groupBy('product_id');
-
-            foreach ($cartItemsByProduct as $cartItems) {
-                $this->addProduct($proposal, $cartItems);
-            }
+            $this->recalculate($proposal);
 
             $proposal->logActivity('created', ['title' => $proposal->title]);
 
-            return $proposal->load('items.allocations');
+            return $proposal;
         });
     }
 
     /**
-     * Copies a proposal with the same package sizes and negotiated prices and
-     * recalculates it from the current carts. The copy starts as a draft and
-     * needs a new vote.
+     * Copies a proposal with its corrections — amounts set by hand, fixed
+     * package counts, rounding — and recalculates it from the current carts
+     * and prices. The copy starts as a draft and needs a new vote.
      */
     public function createNewVersion(OrderProposal $base, User $proposer): OrderProposal
     {
         return DB::transaction(function () use ($base, $proposer): OrderProposal {
-            $base->loadMissing(['items.allocations', 'round']);
+            $base->loadMissing(['items.packages', 'items.allocations', 'round']);
 
             $proposal = $base->round->proposals()->create([
                 'proposed_by_user_id' => $proposer->id,
+                'based_on_proposal_id' => $base->id,
                 'title' => $this->versionTitle($base->title),
                 'description' => $base->description,
-                'shipping_cents' => $base->shipping_cents,
                 'status' => ProposalStatus::Draft,
             ]);
 
-            // Copying the allocations keeps everybody at their pack size until
-            // the recalculation below distributes the quantities anew.
             foreach ($base->items as $baseItem) {
-                $item = $proposal->items()->create(Arr::except($baseItem->only($baseItem->getFillable()), ['proposal_id']));
+                $item = $proposal->items()->create($baseItem->only(['product_id', 'portion_size', 'rounding_step', 'packages_fixed']));
 
-                foreach ($baseItem->allocations as $allocation) {
-                    $item->allocations()->create($allocation->only(['user_id', 'quantity', 'share_cents']));
+                if ($baseItem->packages_fixed) {
+                    foreach ($baseItem->packages as $package) {
+                        $item->packages()->create($package->only($package->getFillable()));
+                    }
+                }
+
+                foreach ($baseItem->allocations->where('is_manual', true) as $allocation) {
+                    $item->allocations()->create($allocation->only(['user_id', 'quantity', 'is_manual']));
                 }
             }
 
@@ -88,352 +89,294 @@ class ProposalBuilder
 
             $proposal->logActivity('created', ['title' => $proposal->title, 'based_on' => $base->id]);
 
-            return $proposal->load('items.allocations');
+            return $proposal;
         });
     }
 
     /**
-     * Brings a draft in line with the carts of the active participants, e.g.
-     * after somebody was excluded or taken back in. Package sizes and
-     * negotiated prices stay, the quantities are distributed anew. Products
-     * nobody orders anymore are dropped; products without an item get one
-     * with the best-fitting package size.
+     * Brings a draft in line with the active carts and the round's prices:
+     * products nobody orders anymore are dropped, new ones added. Amounts
+     * set by hand stay; the rest is distributed anew.
      */
     public function recalculate(OrderProposal $draft): OrderProposal
     {
         return DB::transaction(function () use ($draft): OrderProposal {
-            $draft->load(['items.allocations', 'items.product.priceTiers', 'round']);
+            $draft->load(['items.packages', 'items.allocations', 'round']);
 
-            $cartItemsByProduct = $draft->round->activeCartItems()
-                ->with(['product.priceTiers', 'preferredTier', 'user'])
-                ->get()
-                ->groupBy('product_id')
-                ->toBase();
+            $round = $draft->round;
+            $prices = RoundPriceBook::for($round);
+            $cartItemsByProduct = $this->cartItemsByProduct($round);
 
-            foreach ($draft->items->groupBy('product_id') as $productId => $items) {
-                $this->redistributeProduct($draft, $items, $cartItemsByProduct->get($productId, collect()));
-            }
+            foreach ($draft->items as $item) {
+                $cartItems = $cartItemsByProduct->get($item->product_id);
 
-            foreach ($cartItemsByProduct->except($draft->items->pluck('product_id')->all()) as $cartItems) {
-                $this->addProduct($draft, $cartItems);
-            }
-
-            return $draft->load('items.allocations');
-        });
-    }
-
-    /**
-     * Applies a new package size, count or negotiated price to an item and
-     * redistributes it between the people who ordered the product.
-     */
-    public function updateItem(ProposalItem $item, PackageSpec $spec, ?int $packages = null): ProposalItem
-    {
-        return DB::transaction(function () use ($item, $spec, $packages): ProposalItem {
-            $result = $this->distributor->compute($this->cartItemsFor($item), $spec, $packages);
-
-            $this->applyDistribution($item, $spec, $result);
-
-            return $item->load('allocations');
-        });
-    }
-
-    /**
-     * What each price tier would mean for the current demand — the basis
-     * for choosing the most economical package size.
-     *
-     * @param  Collection<int, CartItem>  $cartItems
-     * @return Collection<int, array{tier: PriceTier, result: DistributionResult, price_per_unit_cents: float}>
-     */
-    public function compareTiers(Product $product, Collection $cartItems): Collection
-    {
-        return $product->priceTiers->map(function (PriceTier $tier) use ($cartItems): array {
-            $result = $this->distributor->compute($cartItems, $tier);
-
-            return [
-                'tier' => $tier,
-                'result' => $result,
-                'price_per_unit_cents' => $result->totalQuantity > 0 ? $result->totalPriceCents / $result->totalQuantity : 0.0,
-            ];
-        })->values();
-    }
-
-    /**
-     * Cheapest price tier that fits the demand. Without a fitting tier the
-     * one with the smallest overshoot wins.
-     *
-     * @param  Collection<int, CartItem>  $cartItems
-     */
-    public function bestTier(Product $product, Collection $cartItems): ?PriceTier
-    {
-        $options = $this->compareTiers($product, $cartItems);
-
-        if ($options->isEmpty()) {
-            return null;
-        }
-
-        $feasible = $options->filter(fn (array $option): bool => $option['result']->feasible);
-
-        if ($feasible->isNotEmpty()) {
-            return $feasible->sortBy([
-                fn (array $a, array $b): int => $a['price_per_unit_cents'] <=> $b['price_per_unit_cents'],
-                fn (array $a, array $b): int => $a['result']->totalPriceCents <=> $b['result']->totalPriceCents,
-            ])->first()['tier'];
-        }
-
-        return $options->sortBy([
-            fn (array $a, array $b): int => $this->overshoot($a['result']) <=> $this->overshoot($b['result']),
-            fn (array $a, array $b): int => $a['price_per_unit_cents'] <=> $b['price_per_unit_cents'],
-        ])->first()['tier'];
-    }
-
-    /**
-     * Products with several indivisible pack sizes (e.g. spaghetti in 250 g
-     * and 2 kg) get one item per pack size, following each participant's
-     * preference. Everything else gets a single item with the best tier.
-     *
-     * @param  Collection<int, CartItem>  $cartItems
-     * @return array<int, array{0: PriceTier, 1: Collection<int, CartItem>}>
-     */
-    private function packageGroups(Product $product, Collection $cartItems): array
-    {
-        if (! $this->isMultiSize($product)) {
-            $tier = $this->bestTier($product, $cartItems);
-
-            return $tier ? [[$tier, $cartItems]] : [];
-        }
-
-        $groups = [];
-
-        foreach ($cartItems as $cartItem) {
-            $tier = $this->packSizeFor($product, $cartItem);
-
-            $groups[$tier->id] ??= [$tier, collect()];
-            $groups[$tier->id][1]->push($cartItem);
-        }
-
-        return array_values($groups);
-    }
-
-    /**
-     * Several indivisible pack sizes, e.g. spaghetti in 250 g and 2 kg bags:
-     * everybody gets whole packs of the size they chose.
-     */
-    private function isMultiSize(Product $product): bool
-    {
-        $tiers = $product->priceTiers;
-
-        return $tiers->count() > 1 && $tiers->every(fn (PriceTier $tier): bool => ! $tier->is_divisible);
-    }
-
-    /**
-     * The pack size somebody chose in their cart, or the one that fits their
-     * wish best.
-     */
-    private function packSizeFor(Product $product, CartItem $cartItem): PriceTier
-    {
-        return $product->priceTiers->firstWhere('id', $cartItem->preferred_price_tier_id)
-            ?? $this->bestFittingPackSize($product->priceTiers, $cartItem);
-    }
-
-    /**
-     * Pack size that covers the wish with the least overshoot, cheaper per
-     * unit on a tie.
-     *
-     * @param  Collection<int, PriceTier>  $tiers
-     */
-    private function bestFittingPackSize(Collection $tiers, CartItem $cartItem): PriceTier
-    {
-        $wanted = $cartItem->effectiveMin();
-
-        return $tiers->sortBy([
-            function (PriceTier $a, PriceTier $b) use ($wanted): int {
-                $overshootA = ceil($wanted / (float) $a->package_amount - 0.001) * (float) $a->package_amount - $wanted;
-                $overshootB = ceil($wanted / (float) $b->package_amount - 0.001) * (float) $b->package_amount - $wanted;
-
-                return $overshootA <=> $overshootB;
-            },
-            fn (PriceTier $a, PriceTier $b): int => $a->pricePerUnit() <=> $b->pricePerUnit(),
-        ])->first();
-    }
-
-    /**
-     * Adds the positions for one ordered product to a proposal.
-     *
-     * @param  Collection<int, CartItem>  $cartItems
-     */
-    private function addProduct(OrderProposal $proposal, Collection $cartItems): void
-    {
-        $product = $cartItems->first()?->product;
-
-        if (! $product instanceof Product || $product->priceTiers->isEmpty()) {
-            return;
-        }
-
-        foreach ($this->packageGroups($product, $cartItems) as [$tier, $groupItems]) {
-            $this->createItem($proposal, $product, PackageSpec::fromTier($tier), $groupItems);
-        }
-    }
-
-    /**
-     * Distributes the positions of one product anew between the people who
-     * order it. Everybody keeps their position; people new to the product
-     * join the one that fits them — for several indivisible pack sizes the
-     * one of their size, which is added if the proposal lacks it.
-     *
-     * @param  Collection<int, ProposalItem>  $items
-     * @param  Collection<int, CartItem>  $cartItems
-     */
-    private function redistributeProduct(OrderProposal $proposal, Collection $items, Collection $cartItems): void
-    {
-        $product = $items->first()->product;
-        $isMultiSize = $product instanceof Product && $this->isMultiSize($product);
-        $cartItemsByItem = [];
-        $missingPackSizes = [];
-
-        foreach ($cartItems as $cartItem) {
-            $item = $items->first(fn (ProposalItem $item): bool => $item->stakeholderIds()->contains($cartItem->user_id));
-
-            if ($item === null && ! $isMultiSize) {
-                $item = $items->first();
-            }
-
-            if ($item === null) {
-                $tier = $this->packSizeFor($product, $cartItem);
-                $item = $items->firstWhere('price_tier_id', $tier->id);
-
-                if ($item === null) {
-                    $missingPackSizes[$tier->id] ??= [$tier, collect()];
-                    $missingPackSizes[$tier->id][1]->push($cartItem);
+                if ($cartItems === null) {
+                    $item->delete();
 
                     continue;
                 }
+
+                $this->calculateItem($item, $cartItems, $prices);
             }
 
-            $cartItemsByItem[$item->id] ??= collect();
-            $cartItemsByItem[$item->id]->push($cartItem);
-        }
+            foreach ($cartItemsByProduct->except($draft->items->pluck('product_id')->all()) as $productId => $cartItems) {
+                if ($cartItems->first()->product?->priceTiers->isEmpty() ?? true) {
+                    continue;
+                }
 
-        foreach ($items as $item) {
-            $spec = $item->toPackageSpec();
-            $result = $this->distributor->compute($cartItemsByItem[$item->id] ?? collect(), $spec);
-
-            if ($result->packagesOrdered <= 0) {
-                $item->delete();
-
-                continue;
+                $this->calculateItem($draft->items()->create(['product_id' => $productId]), $cartItems, $prices);
             }
 
-            $this->applyDistribution($item, $spec, $result);
-        }
+            $this->refreshShipping($draft, $prices);
 
-        foreach ($missingPackSizes as [$tier, $groupItems]) {
-            $this->createItem($proposal, $product, PackageSpec::fromTier($tier), $groupItems);
-        }
+            return $draft->load(['items.packages', 'items.allocations']);
+        });
     }
 
     /**
-     * Adds one position for the given package to a proposal and distributes
-     * it between the given cart items.
+     * Sets what somebody gets of a position by hand — or hands it back to
+     * the automatic distribution with null.
+     */
+    public function setAllocation(ProposalItem $item, int $userId, ?float $quantity): ProposalItem
+    {
+        $this->ensureDraft($item->proposal);
+        $this->ensure($quantity === null || $quantity >= 0, 'Die Menge darf nicht negativ sein.');
+        $this->ensure($quantity === null || $item->isWholePortions($quantity), sprintf(
+            'Die Menge muss ein Vielfaches der Portion (%s) sein.',
+            CartItem::formatAmount((float) $item->portion_size, $item->product?->unitLabel()),
+        ));
+
+        /** @var ProposalAllocation|null $allocation */
+        $allocation = $item->allocations()->where('user_id', $userId)->first();
+        $this->ensure($allocation !== null, 'Diese Person hat das Produkt nicht bestellt.');
+
+        return DB::transaction(function () use ($item, $allocation, $quantity): ProposalItem {
+            $allocation->update(['is_manual' => $quantity !== null, 'quantity' => round($quantity ?? 0.0, 3)]);
+
+            return $this->recalculateItem($item);
+        });
+    }
+
+    /**
+     * Fixes how many packages of each size are ordered — or lets the
+     * cheapest combination be found again with null.
      *
+     * @param  array<int, int>|null  $countsByTierId
+     */
+    public function setPackageCounts(ProposalItem $item, ?array $countsByTierId): ProposalItem
+    {
+        $this->ensureDraft($item->proposal);
+        $this->ensure($item->isPortioned(), 'Bei ganzen Packungen ergibt sich die Anzahl aus den Wünschen.');
+
+        return DB::transaction(function () use ($item, $countsByTierId): ProposalItem {
+            if ($countsByTierId === null) {
+                $item->update(['packages_fixed' => false]);
+
+                return $this->recalculateItem($item);
+            }
+
+            $tiers = $item->product->priceTiers->keyBy('id');
+            $counts = collect($countsByTierId)
+                ->mapWithKeys(fn (mixed $count, int|string $tierId): array => [(int) $tierId => max(0, (int) $count)])
+                ->filter(fn (int $count, int $tierId): bool => $count > 0 && $tiers->has($tierId));
+
+            $this->ensure($counts->isNotEmpty(), 'Bitte mindestens ein Gebinde bestellen.');
+
+            $available = collect(RoundPriceBook::for($item->proposal->round)->optionsFor($item->product))
+                ->filter(fn (PackageOption $option): bool => $option->available)
+                ->pluck('priceTierId');
+
+            foreach ($counts->keys() as $tierId) {
+                $this->ensure($available->contains($tierId), '„'.$tiers->get($tierId)->label.'“ ist laut Lieferant nicht lieferbar.');
+            }
+
+            $item->packages()->delete();
+
+            foreach ($counts as $tierId => $count) {
+                /** @var PriceTier $tier */
+                $tier = $tiers->get($tierId);
+
+                $item->packages()->create([
+                    'price_tier_id' => $tier->id,
+                    'label' => $tier->label,
+                    'package_amount' => $tier->package_amount,
+                    'price_cents' => $tier->price_cents,
+                    'list_price_cents' => $tier->price_cents,
+                    'count' => $count,
+                ]);
+            }
+
+            $item->update(['packages_fixed' => true]);
+
+            return $this->recalculateItem($item);
+        });
+    }
+
+    /**
+     * Distributes the flexible shares of a position in coarser steps, e.g.
+     * half kilograms — or in portions again with null.
+     */
+    public function setRounding(ProposalItem $item, ?float $step): ProposalItem
+    {
+        $this->ensureDraft($item->proposal);
+        $this->ensure($item->isPortioned(), 'Ganze Packungen lassen sich nicht runden.');
+        $this->ensure($step === null || $step > 0, 'Bitte eine Schrittweite größer als 0 wählen.');
+
+        $item->update(['rounding_step' => $step]);
+
+        return $this->recalculateItem($item);
+    }
+
+    public function recalculateItem(ProposalItem $item): ProposalItem
+    {
+        $item->load(['packages', 'allocations', 'proposal.round']);
+
+        $cartItems = $this->cartItemsByProduct($item->proposal->round, $item->product_id)->get($item->product_id);
+
+        if ($cartItems === null) {
+            $item->delete();
+
+            return $item;
+        }
+
+        $this->calculateItem($item, $cartItems, RoundPriceBook::for($item->proposal->round));
+
+        return $item->load(['packages', 'allocations']);
+    }
+
+    /**
      * @param  Collection<int, CartItem>  $cartItems
      */
-    public function createItem(OrderProposal $proposal, Product $product, PackageSpec $spec, Collection $cartItems): ?ProposalItem
+    private function calculateItem(ProposalItem $item, Collection $cartItems, RoundPriceBook $prices): void
     {
-        $result = $this->distributor->compute($cartItems, $spec);
+        /** @var Product $product */
+        $product = $cartItems->first()->product;
+        $item->loadMissing(['packages', 'allocations']);
 
-        if ($result->packagesOrdered <= 0) {
-            return null;
+        $manual = $item->allocations->where('is_manual', true)->keyBy('user_id');
+        $demands = $cartItems
+            ->map(fn (CartItem $cartItem): Demand => Demand::fromCartItem(
+                $cartItem,
+                $manual->has($cartItem->user_id) ? (float) $manual->get($cartItem->user_id)->quantity : null,
+            ))
+            ->values()
+            ->all();
+
+        $fixedCounts = $item->packages_fixed
+            ? $item->packages->filter(fn (ProposalItemPackage $package): bool => $package->price_tier_id !== null)->pluck('count', 'price_tier_id')->all()
+            : null;
+
+        // Fixed sizes that can't be delivered anymore leave nothing to fix — find the best mix again.
+        if ($fixedCounts === []) {
+            $fixedCounts = null;
+            $item->packages_fixed = false;
         }
 
-        $item = $proposal->items()->create([
-            'product_id' => $product->id,
-            ...$this->itemAttributes($spec, $result),
-        ]);
+        $result = $this->distributor->distribute(
+            $demands,
+            $prices->optionsFor($product),
+            $product->portionSize(),
+            $product->unitLabel(),
+            $fixedCounts,
+            $product->isPortioned() && $item->rounding_step !== null ? (float) $item->rounding_step : null,
+        );
 
-        $this->storeAllocations($item, $result);
+        // Nobody needs anything and no package fits the wishes: nothing to order.
+        if ($result->mix->isEmpty() && collect($demands)->every(fn (Demand $demand): bool => $demand->wantedMin() <= 0.0005)) {
+            $item->delete();
 
-        return $item;
+            return;
+        }
+
+        $this->store($item, $product, $result);
     }
 
     /**
-     * @return array<string, mixed>
+     * Saves packages and allocations of a position. Votes are dropped: they
+     * were given for other amounts.
      */
-    private function itemAttributes(PackageSpec $spec, DistributionResult $result): array
+    private function store(ProposalItem $item, Product $product, DistributionResult $result): void
     {
-        return [
-            'price_tier_id' => $spec->priceTierId,
-            'tier_label' => $spec->label,
-            'package_amount' => $spec->packageAmount,
-            'package_price_cents' => $spec->priceCents,
-            'is_divisible' => $spec->isDivisible,
-            'divisible_step' => $spec->divisibleStep,
-            'min_order_packages' => $spec->minOrderPackages,
-            'packages_ordered' => $result->packagesOrdered,
-            'total_price_cents' => $result->totalPriceCents,
-        ];
-    }
+        $item->packages()->delete();
+        $packageIds = [];
 
-    /**
-     * Stores a new distribution on an existing item. Votes are dropped: they
-     * were given for the old quantities.
-     */
-    private function applyDistribution(ProposalItem $item, PackageSpec $spec, DistributionResult $result): void
-    {
-        $item->fill([
-            ...$this->itemAttributes($spec, $result),
-            'notes' => null,
-        ])->save();
+        foreach ($result->mix->lines as $line) {
+            $option = $line['option'];
+
+            $package = $item->packages()->create([
+                'price_tier_id' => $option->priceTierId,
+                'label' => $option->label,
+                'article_number' => $option->articleNumber,
+                'package_amount' => $option->amount,
+                'price_cents' => $option->priceCents,
+                'list_price_cents' => $option->listPriceCents,
+                'min_order_packages' => $option->minOrderPackages,
+                'count' => $line['count'],
+            ]);
+
+            $packageIds[(int) $option->priceTierId] = $package->id;
+        }
 
         $item->allocations()->delete();
         $item->votes()->delete();
-        $this->storeAllocations($item, $result);
-    }
 
-    private function storeAllocations(ProposalItem $item, DistributionResult $result): void
-    {
-        foreach ($result->allocations as $allocation) {
+        foreach ($result->allocations as $line) {
             $item->allocations()->create([
-                'user_id' => $allocation->userId,
-                'quantity' => round($allocation->allocatedQuantity, 3),
-                'share_cents' => $allocation->shareCents,
+                'user_id' => $line->userId,
+                'quantity' => round($line->allocatedQuantity, 3),
+                'share_cents' => $line->shareCents,
+                'is_manual' => $line->manual,
+                'package_counts' => $line->packageCounts === []
+                    ? null
+                    : collect($line->packageCounts)->mapWithKeys(fn (int $count, int $tierId): array => [$packageIds[$tierId] ?? $tierId => $count])->all(),
             ]);
         }
 
-        if (! $result->feasible && $result->notes !== []) {
-            $item->forceFill(['notes' => implode("\n", $result->notes)])->save();
-        }
+        $item->fill([
+            'portion_size' => $product->portionSize(),
+            'rounding_step' => $product->isPortioned() ? $item->rounding_step : null,
+            'packages_fixed' => $product->isPortioned() && $item->packages_fixed,
+            'total_price_cents' => $result->totalPriceCents(),
+            'notes' => $result->notes === [] ? null : implode("\n", $result->notes),
+        ])->save();
+
+        $item->unsetRelation('packages')->unsetRelation('allocations');
+    }
+
+    private function refreshShipping(OrderProposal $draft, RoundPriceBook $prices): void
+    {
+        $supplierIds = $draft->items()->with('product')->get()
+            ->map(fn (ProposalItem $item): ?int => $item->product?->supplier_id)
+            ->filter()
+            ->all();
+
+        $draft->update(['shipping_by_supplier' => $prices->shippingFor($supplierIds)]);
     }
 
     /**
-     * Cart items the item is distributed between: everybody who ordered the
-     * product, or — if the product is split into several pack sizes — the
-     * people currently assigned to this pack size.
-     *
-     * @return Collection<int, CartItem>
+     * @return Collection<int, Collection<int, CartItem>>
      */
-    private function cartItemsFor(ProposalItem $item): Collection
+    private function cartItemsByProduct(Round $round, ?int $productId = null): Collection
     {
-        $item->loadMissing('proposal.round');
-
-        $cartItems = $item->proposal->round->activeCartItems()
-            ->where('product_id', $item->product_id)
-            ->with(['product', 'user'])
-            ->get();
-
-        $siblings = $item->proposal->items()->where('product_id', $item->product_id)->count();
-
-        if ($siblings > 1) {
-            return $cartItems->whereIn('user_id', $item->stakeholderIds()->all())->values();
-        }
-
-        return $cartItems;
+        return $round->activeCartItems()
+            ->when($productId !== null, fn ($query) => $query->where('product_id', $productId))
+            ->with(['product.priceTiers', 'product.supplier', 'user'])
+            ->orderBy('id')
+            ->get()
+            ->groupBy('product_id')
+            ->toBase();
     }
 
-    private function overshoot(DistributionResult $result): float
+    private function ensureDraft(OrderProposal $proposal): void
     {
-        $sumMax = array_sum(array_map(fn ($line): float => $line->requestedMax, $result->allocations));
+        $this->ensure($proposal->isDraft(), 'Nur Entwürfe lassen sich anpassen — für Änderungen gibt es eine neue Version.');
+    }
 
-        return max(0.0, $result->totalQuantity - $sumMax);
+    private function ensure(bool $condition, string $message): void
+    {
+        if (! $condition) {
+            throw ValidationException::withMessages(['proposal' => $message]);
+        }
     }
 
     private function versionTitle(string $title): string

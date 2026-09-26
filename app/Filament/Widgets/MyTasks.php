@@ -13,6 +13,8 @@ use App\Models\Round;
 use App\Models\User;
 use App\Services\Money\Money;
 use App\Services\Rounds\ConsensusChecker;
+use App\Services\Rounds\SupplierFeedback;
+use App\Services\Rounds\SupplierOrders;
 use Filament\Facades\Filament;
 use Filament\Widgets\Widget;
 
@@ -74,16 +76,23 @@ class MyTasks extends Widget
         $isLead = $round->isManagedBy($user);
         $url = RoundResource::getUrl('view', ['record' => $round]);
 
-        return match ($round->phase) {
+        $tasks = match ($round->phase) {
             RoundPhase::Draft => $isLead ? [$this->draftTask($round, $url)] : [],
             RoundPhase::Shopping => $this->shoppingTasks($round, $user, $isLead, $url),
-            RoundPhase::Negotiating => $isLead ? [$this->task('📞', "Verhandlung für „{$round->title}“ abschließen", 'Preise beim Hersteller einholen, Vorschlag anpassen und zur Abstimmung freigeben.', 'Zur Runde', $url.'?phase=negotiating', 'warning')] : [],
+            RoundPhase::Negotiating => $isLead ? [$this->adjustmentTask($round, $url)] : [],
             RoundPhase::Finalizing => $this->votingTasks($round, $user, $isLead, $url),
             RoundPhase::Payment => $this->paymentTasks($round, $user, $isLead, $url),
-            RoundPhase::Ordering => $isLead ? [$this->task('📦', "Bestellung für „{$round->title}“ aufgeben", 'Alle haben bezahlt — jetzt beim Hersteller bestellen und danach „Weiter zu: Lieferung“.', 'Zur Runde', $url, 'amber')] : [],
+            RoundPhase::Ordering => $isLead ? [$this->orderingTask($round, $url)] : [],
+            RoundPhase::Delivery => $isLead ? [$this->deliveryTask($round, $url)] : [],
             RoundPhase::Pickup => $this->pickupTasks($round, $user, $url),
             default => [],
         };
+
+        if ($isLead && in_array($round->phase, [RoundPhase::Ordering, RoundPhase::Delivery], true) && ! $round->pickupDates()->exists()) {
+            $tasks[] = $this->task('📅', "Abholtermine für „{$round->title}“ festlegen", 'Sobald der Liefertermin absehbar ist — ohne Termin kann die Abholung nicht beginnen.', 'Zur Runde', $url, 'amber');
+        }
+
+        return $tasks;
     }
 
     /**
@@ -97,10 +106,61 @@ class MyTasks extends Widget
         $running = $round->group->runningRound();
 
         if ($running === null) {
-            return $this->task('📝', "Entwurf „{$round->title}“ starten", 'Abholort und mindestens einen Abholtermin eintragen, dann die Einkaufsphase eröffnen.', 'Zur Runde', $url, 'amber');
+            return $this->task('📝', "Entwurf „{$round->title}“ starten", 'Abholort eintragen, dann die Einkaufsphase eröffnen.', 'Zur Runde', $url, 'amber');
         }
 
         return $this->task('📝', "Entwurf „{$round->title}“ ist vorbereitet", "Starten kannst du ihn, sobald „{$running->title}“ abgeschlossen ist — es läuft immer nur eine Runde.", 'Zum Entwurf', $url, 'gray');
+    }
+
+    /**
+     * The lead sees which suppliers still owe an answer.
+     *
+     * @return array<string, string>
+     */
+    private function adjustmentTask(Round $round, string $url): array
+    {
+        $suppliers = app(SupplierFeedback::class)->suppliersFor($round);
+        $answered = $round->roundSuppliers()->whereNotNull('responded_at')->pluck('supplier_id');
+        $waiting = $suppliers->reject(fn ($supplier): bool => $answered->contains($supplier->id));
+
+        $description = $waiting->isEmpty()
+            ? 'Alle Lieferanten haben geantwortet — Vorschlag prüfen und zur Abstimmung stellen.'
+            : 'Noch ohne Rückmeldung: '.$waiting->pluck('name')->implode(', ').'. Danach den Vorschlag prüfen und zur Abstimmung stellen.';
+
+        return $this->task('📞', "Anpassung für „{$round->title}“ abschließen", $description, 'Zur Runde', $url.'?phase=negotiating', 'warning');
+    }
+
+    /**
+     * The lead sees at which suppliers the order still has to go out.
+     *
+     * @return array<string, string>
+     */
+    private function orderingTask(Round $round, string $url): array
+    {
+        $open = app(SupplierOrders::class)->notOrdered($round);
+
+        $description = $open->isEmpty()
+            ? 'Bei allen Lieferanten ist bestellt — jetzt „Weiter zu: Lieferung“.'
+            : 'Alle haben bezahlt. Noch zu bestellen: '.$open->pluck('name')->implode(', ').'.';
+
+        return $this->task('📦', "Bestellung für „{$round->title}“ aufgeben", $description, 'Zur Runde', $url.'?phase=ordering', 'amber');
+    }
+
+    /**
+     * The lead ticks off each delivery; once everything arrived, pickup
+     * can start.
+     *
+     * @return array<string, string>
+     */
+    private function deliveryTask(Round $round, string $url): array
+    {
+        $open = app(SupplierOrders::class)->notDelivered($round);
+
+        if ($open->isEmpty()) {
+            return $this->task('🚚', "Die Ware für „{$round->title}“ ist da", 'Alle Lieferungen sind angekommen — jetzt „Weiter zu: Abholung“.', 'Zur Runde', $url.'?phase=delivery', 'success');
+        }
+
+        return $this->task('🚚', "Lieferungen für „{$round->title}“ abhaken", 'Noch nicht angekommen: '.$open->pluck('name')->implode(', ').'.', 'Zur Runde', $url.'?phase=delivery', 'gray');
     }
 
     /**
@@ -115,7 +175,7 @@ class MyTasks extends Widget
         }
 
         if ($isLead && $round->shopping_deadline?->isPast()) {
-            $tasks[] = $this->task('⏰', "Einkaufsphase von „{$round->title}“ ist abgelaufen", 'Wenn alle fertig sind: „Weiter zu: Verhandlung“.', 'Zur Runde', $url, 'warning');
+            $tasks[] = $this->task('⏰', "Einkaufsphase von „{$round->title}“ ist abgelaufen", 'Wenn alle fertig sind: „Weiter zu: Anpassung“.', 'Zur Runde', $url, 'warning');
         }
 
         return $tasks;

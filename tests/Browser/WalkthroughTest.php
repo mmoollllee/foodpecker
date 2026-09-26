@@ -1,10 +1,13 @@
 <?php
 
+use App\Enums\ProposalStatus;
+use App\Enums\RoundPhase;
 use App\Models\Group;
-use App\Models\Manufacturer;
+use App\Models\Payment;
 use App\Models\PickupDate;
 use App\Models\Product;
 use App\Models\Round;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Groups\OwnerTransfer;
 use App\Services\Proposals\ProposalBuilder;
@@ -66,14 +69,14 @@ it('klickt sich durch alle Resource-Seiten und prüft Konsolen-Fehler', function
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '03-dashboard', fullPage: true);
 
-    // Hersteller
-    $page->navigate('/g/speisekammer-schoeneberg/manufacturers')
-        ->assertSee('Hersteller')
+    // Lieferanten
+    $page->navigate('/g/speisekammer-schoeneberg/suppliers')
+        ->assertSee('Lieferanten')
         ->assertSee('Spielberger Mühle')
         ->assertSee('Hofladen Brandenburg')
         ->assertSee('Senfwerk Düsseldorf')
         ->assertNoJavaScriptErrors()
-        ->screenshot(filename: '04-manufacturers');
+        ->screenshot(filename: '04-suppliers');
 
     // Produkte — sollten alle fünf Verpackungs-Szenarien sichtbar sein
     $page->navigate('/g/speisekammer-schoeneberg/products')
@@ -198,6 +201,24 @@ it('rendert die abgeschlossene Runde mit Zahlungen und Abholungen', function () 
         ->screenshot(filename: '11-completed-round', fullPage: true);
 });
 
+it('shows somebody who still has to pay the lead\'s account with a GiroCode', function () {
+    $aylin = User::where('email', 'aylin@foodpecker.test')->firstOrFail();
+    $round = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail();
+    $proposal = $round->proposals()->where('title', 'like', 'Vorschlag A%')->firstOrFail();
+    $proposal->update(['status' => ProposalStatus::Chosen]);
+    $round->update(['chosen_proposal_id' => $proposal->id, 'phase' => RoundPhase::Payment]);
+    Payment::create(['round_id' => $round->id, 'user_id' => $aylin->id, 'amount_cents' => 4250]);
+    $this->actingAs($aylin);
+
+    visit("/g/speisekammer-schoeneberg/rounds/{$round->id}")
+        ->assertSee('DE33 1002 0500 0001 2345 67')
+        ->assertSee('Frühjahr-Bestellung 2026 – Aylin Yıldız')
+        ->assertVisible('img[alt^="GiroCode"]')
+        ->click('dd:has-text("DE33") button')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '11b-payment-with-girocode', fullPage: true);
+});
+
 it('lässt sich mit dem Tenant-Switcher zur zweiten Gruppe wechseln', function () {
     $this->actingAs($this->marie);
 
@@ -224,16 +245,16 @@ it('Bestellrunden-Wizard zeigt fünf Schritte inklusive Sortiment-Auswahl', func
         ->screenshot(filename: '13-round-wizard-step1', fullPage: true);
 });
 
-it('Produkt-Wizard öffnet sich als Modal mit drei Schritten', function () {
+it('Produkt-Wizard öffnet sich als Modal mit vier Schritten', function () {
     $this->actingAs($this->marie);
 
     $page = visit('/g/speisekammer-schoeneberg/products')
         ->press('Produkt anlegen')
         ->wait(1)
         ->assertSee('Stammdaten')
-        ->assertSee('Verpackungs-Logik')
-        ->assertSee('Preisstaffeln')
-        ->assertSee('Hersteller')
+        ->assertSee('Verteilung')
+        ->assertSee('Gebinde & Preise')
+        ->assertSee('Lieferant')
         ->assertSee('Produktname')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '14-product-wizard-step1', fullPage: true);
@@ -261,6 +282,23 @@ it('Eckdaten bearbeiten lädt die Pickup-Termine vor und speichert sie ohne Verl
     $round = Round::with('pickupDates')->find($activeRoundId);
     expect($round->lead_user_id)->toBe($this->marie->id);
     expect($round->pickupDates->count())->toBe($pickupCountBefore);
+});
+
+it('lets the lead type a deadline into the date field', function () {
+    $this->actingAs($this->marie);
+    $round = Round::where('title', 'Frühjahr-Bestellung 2026')->firstOrFail();
+
+    visit("/g/speisekammer-schoeneberg/rounds/{$round->id}")
+        ->press('Eckdaten bearbeiten')
+        ->wait(1)
+        ->fill('input[id$="shopping_deadline"]', '12.5.26')
+        ->keys('input[id$="shopping_deadline"]', 'Tab')
+        ->assertValue('input[id$="shopping_deadline"]', '12.05.2026')
+        ->press('Speichern')
+        ->wait(2)
+        ->assertNoJavaScriptErrors();
+
+    expect($round->fresh()->shopping_deadline->toDateString())->toBe('2026-05-12');
 });
 
 it('Draft-Runde ist nur für den Lead sichtbar und zeigt den "Bestellrunde starten"-Button', function () {
@@ -347,7 +385,7 @@ it('smoke-tested die Hauptseiten parallel auf JS-Fehler (schneller Sanity-Check)
 
     $pages = visit([
         $base,
-        "{$base}/manufacturers",
+        "{$base}/suppliers",
         "{$base}/products",
         "{$base}/rounds",
         "{$base}/rounds/create",
@@ -395,18 +433,18 @@ it('lets the lead exclude a blocking participant while preparing a new version',
         ->screenshot(filename: '22b-exclude-from-draft');
 });
 
-it('shows manufacturer and product pages with notes, documents and price history', function () {
+it('shows supplier and product pages with notes, documents and price history', function () {
     $this->actingAs($this->marie);
 
-    $manufacturer = Manufacturer::where('name', 'Senfwerk Düsseldorf')->firstOrFail();
+    $supplier = Supplier::where('name', 'Senfwerk Düsseldorf')->firstOrFail();
     $product = Product::where('name', 'Bio Dinkelmehl Type 630')->firstOrFail();
 
-    visit("/g/speisekammer-schoeneberg/manufacturers/{$manufacturer->id}")
+    visit("/g/speisekammer-schoeneberg/suppliers/{$supplier->id}")
         ->assertSee('Senfwerk Düsseldorf')
         ->assertSee('Versandtermin im November war knapp')
         ->assertSee('Dokument hochladen')
         ->assertNoJavaScriptErrors()
-        ->screenshot(filename: '23-manufacturer-page', fullPage: true);
+        ->screenshot(filename: '23-supplier-page', fullPage: true);
 
     visit("/g/speisekammer-schoeneberg/products/{$product->id}")
         ->assertSee('Gebindegrößen & Preise')
@@ -424,6 +462,44 @@ it('shows the personal order history', function () {
         ->assertSee('Spätsommer-Bestellung 2025')
         ->assertNoJavaScriptErrors()
         ->screenshot(filename: '25-my-orders', fullPage: true);
+});
+
+it('shows the adjustment phase with the supplier cards and the draft', function () {
+    $linus = User::where('email', 'linus@foodpecker.test')->firstOrFail();
+    $round = Round::where('title', 'Herbst-Bestellung 2026')->firstOrFail();
+    $this->actingAs($linus);
+
+    visit("/g/familie-mueller-friends/rounds/{$round->id}")
+        ->assertSee('Zur Abstimmung stellen')
+        ->assertSee('Rückmeldungen 1/3')
+        ->assertSee('Spielberger Mühle')
+        ->assertSee('Rückmeldung speichern')
+        ->assertSee('Nachfassen')
+        ->assertSee('Bestellvorschlag')
+        ->assertSee('Mengen runden')
+        ->assertNoJavaScriptErrors()
+        ->screenshot(filename: '28-adjustment-phase', fullPage: true);
+});
+
+it('lets the lead record a supplier\'s answer and round an amount in the draft', function () {
+    $linus = User::where('email', 'linus@foodpecker.test')->firstOrFail();
+    $round = Round::where('title', 'Herbst-Bestellung 2026')->firstOrFail();
+    $senfwerk = Supplier::where('slug', 'senfwerk-duesseldorf')->firstOrFail();
+    $this->actingAs($linus);
+
+    visit("/g/familie-mueller-friends/rounds/{$round->id}")
+        ->fill('section[aria-label="Senfwerk Düsseldorf"] input[aria-label="Versandkosten"]', '9,50')
+        ->click('section[aria-label="Senfwerk Düsseldorf"] button:has-text("Rückmeldung speichern")')
+        ->wait(1)
+        ->assertSee('Rückmeldung von Senfwerk Düsseldorf gespeichert.')
+        ->assertSee('Rückmeldungen 2/3')
+        ->fill('input[aria-label="Menge für Aylin"] >> nth=0', '9')
+        ->keys('input[aria-label="Menge für Aylin"] >> nth=0', 'Tab')
+        ->wait(1)
+        ->assertSee('von Hand')
+        ->assertNoJavaScriptErrors();
+
+    expect($round->roundSuppliers()->where('supplier_id', $senfwerk->id)->value('shipping_cents'))->toBe(950);
 });
 
 it('lets the owner dissolve a group from the group settings', function () {

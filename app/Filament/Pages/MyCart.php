@@ -12,6 +12,7 @@ use App\Models\Group;
 use App\Models\Product;
 use App\Models\Round;
 use App\Models\User;
+use App\Services\Estimates\PriceEstimator;
 use App\Services\Rounds\CartService;
 use App\Services\Rounds\OrderHistory;
 use BackedEnum;
@@ -29,6 +30,7 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Url;
 
 /**
  * The own cart in the round the group is running. It can be changed while
@@ -48,6 +50,18 @@ class MyCart extends Page implements HasActions, HasSchemas
     protected static string|\UnitEnum|null $navigationGroup = 'Bestellungen';
 
     protected static ?int $navigationSort = 2;
+
+    /**
+     * Filters of the product overview.
+     */
+    #[Url]
+    public string $search = '';
+
+    #[Url]
+    public ?string $category = null;
+
+    #[Url]
+    public ?int $supplier = null;
 
     protected ?Round $runningRound = null;
 
@@ -110,6 +124,7 @@ class MyCart extends Page implements HasActions, HasSchemas
                 ),
                 CartItemForm::productCard(),
                 ...CartItemForm::quantityFields(),
+                CartItemForm::estimateHint(fn (): ?Round => $this->getRunningRound(), fn (): int => $this->currentUser()->id),
                 CartItemForm::preferredTierField(),
                 CartItemForm::notesField(),
             ])
@@ -149,6 +164,7 @@ class MyCart extends Page implements HasActions, HasSchemas
                 Hidden::make('product_id'),
                 CartItemForm::productCard(),
                 ...CartItemForm::quantityFields(),
+                CartItemForm::estimateHint(fn (): ?Round => $this->getRunningRound(), fn (): int => $this->currentUser()->id),
                 CartItemForm::preferredTierField(),
                 CartItemForm::notesField(),
             ])
@@ -229,19 +245,59 @@ class MyCart extends Page implements HasActions, HasSchemas
         }
 
         $participant = $round->participantFor($this->currentUser());
+        $items = $round->cartItems()
+            ->where('user_id', $this->currentUser()->id)
+            ->with(['product.supplier', 'product.priceTiers', 'preferredTier'])
+            ->get();
+        $products = $this->canShop() ? $this->orderableProducts($round) : collect();
 
         return [
             'round' => $round,
             'participant' => $participant,
-            'items' => $round->cartItems()
-                ->where('user_id', $this->currentUser()->id)
-                ->with(['product.manufacturer', 'product.priceTiers', 'preferredTier'])
-                ->get(),
+            'items' => $items,
             'canShop' => $this->canShop(),
             'isFull' => $round->phase === RoundPhase::Shopping && $participant === null && $round->hasReachedParticipantLimit(),
             'suggestions' => $this->canShop() ? $this->previousSuggestions($round) : collect(),
             'roundUrl' => RoundResource::getUrl('view', ['record' => $round]),
+            'estimate' => app(PriceEstimator::class)->estimate($round),
+            'catalog' => $this->filterProducts($products)
+                ->sortBy(fn (Product $product): string => sprintf('%02d %s', $product->category?->sortOrder() ?? 99, $product->name))
+                ->groupBy(fn (Product $product): string => $product->category instanceof ProductCategory ? $product->category->getLabel() : 'Sonstiges'),
+            'categories' => $products->pluck('category')->filter()->unique()->sortBy(fn (ProductCategory $category): int => $category->sortOrder())->values(),
+            'suppliers' => $products->pluck('supplier')->filter()->unique('id')->sortBy('name')->values(),
+            'myItems' => $items->keyBy('product_id'),
+            'demand' => $round->activeCartItems()->get()->groupBy('product_id'),
         ];
+    }
+
+    public function filterByCategory(?string $category): void
+    {
+        $this->category = $this->category === $category ? null : $category;
+    }
+
+    /**
+     * @return Collection<int, Product>
+     */
+    protected function orderableProducts(Round $round): Collection
+    {
+        return $round->availableProductsForCart()->with(['supplier', 'priceTiers'])->get();
+    }
+
+    /**
+     * @param  Collection<int, Product>  $products
+     * @return Collection<int, Product>
+     */
+    protected function filterProducts(Collection $products): Collection
+    {
+        $search = mb_strtolower(trim($this->search));
+
+        return $products
+            ->when($search !== '', fn (Collection $products): Collection => $products->filter(
+                fn (Product $product): bool => str_contains(mb_strtolower($product->name.' '.$product->supplier?->name.' '.$product->description), $search),
+            ))
+            ->when($this->category !== null, fn (Collection $products): Collection => $products->filter(fn (Product $product): bool => $product->category?->value === $this->category))
+            ->when($this->supplier !== null, fn (Collection $products): Collection => $products->where('supplier_id', $this->supplier))
+            ->values();
     }
 
     /**
@@ -262,7 +318,8 @@ class MyCart extends Page implements HasActions, HasSchemas
     }
 
     /**
-     * Products from last time that are orderable now and not yet in the cart.
+     * Products from last time that are orderable now and not yet in the
+     * cart, in whole portions of today's product.
      *
      * @return Collection<int, array{product_id: int, product_name: string, quantity: float, unit: string, round_title: string}>
      */
@@ -275,10 +332,17 @@ class MyCart extends Page implements HasActions, HasSchemas
         $inCart = $round->cartItems()->where('user_id', $this->currentUser()->id)->pluck('product_id')->all();
         $available = $round->availableProductsForCart()->pluck('products.id')->all();
 
-        return app(OrderHistory::class)
+        $suggestions = app(OrderHistory::class)
             ->previousQuantities($this->currentUser(), $round)
             ->filter(fn (array $suggestion): bool => in_array($suggestion['product_id'], $available, true)
-                && ! in_array($suggestion['product_id'], $inCart, true))
+                && ! in_array($suggestion['product_id'], $inCart, true));
+        $products = Product::query()->whereIn('id', $suggestions->pluck('product_id'))->get()->keyBy('id');
+
+        return $suggestions
+            ->map(fn (array $suggestion): array => [
+                ...$suggestion,
+                'quantity' => $products->get($suggestion['product_id'])?->toWholePortions($suggestion['quantity']) ?? $suggestion['quantity'],
+            ])
             ->values();
     }
 
@@ -317,20 +381,20 @@ class MyCart extends Page implements HasActions, HasSchemas
     }
 
     /**
-     * Product options grouped by category, with the manufacturer as suffix.
+     * Product options grouped by category, with the supplier as suffix.
      *
      * @return array<string, array<int, string>>
      */
     protected function groupedProductOptions(Round $round): array
     {
         return $round->availableProductsForCart()
-            ->with('manufacturer')
+            ->with('supplier')
             ->get()
             ->sortBy(fn (Product $product): string => sprintf('%02d %s', $product->category?->sortOrder() ?? 99, $product->name))
             ->groupBy(fn (Product $product): string => $product->category instanceof ProductCategory ? $product->category->getLabel() : 'Sonstiges')
             ->map(fn (Collection $products): array => $products
                 ->mapWithKeys(fn (Product $product): array => [
-                    $product->id => $product->manufacturer ? $product->name.' · '.$product->manufacturer->name : $product->name,
+                    $product->id => $product->supplier ? $product->name.' · '.$product->supplier->name : $product->name,
                 ])
                 ->all())
             ->all();
@@ -345,7 +409,7 @@ class MyCart extends Page implements HasActions, HasSchemas
         $previous = app(OrderHistory::class)->previousQuantities($this->currentUser(), $round)->get($productId);
 
         return $previous
-            ? sprintf('Letztes Mal (%s) hast du %s %s bekommen.', $previous['round_title'], CartItem::formatQuantity($previous['quantity']), $previous['unit'])
+            ? sprintf('Letztes Mal (%s) hast du %s bekommen.', $previous['round_title'], CartItem::formatAmount($previous['quantity'], $previous['unit']))
             : null;
     }
 

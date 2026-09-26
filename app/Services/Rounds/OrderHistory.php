@@ -34,7 +34,7 @@ class OrderHistory
             ->whereHas('chosenProposal.allocations', fn ($query) => $query
                 ->where('proposal_allocations.user_id', $user->id)
                 ->where('proposal_allocations.quantity', '>', 0))
-            ->with(['lead', 'chosenProposal.items.product', 'chosenProposal.items.allocations', 'chosenProposal.round.participants', 'payments'])
+            ->with(['lead', 'chosenProposal.items.product', 'chosenProposal.items.packages', 'chosenProposal.items.allocations', 'chosenProposal.round.participants', 'payments'])
             ->orderByDesc('phase_changed_at')
             ->orderByDesc('id')
             ->get()
@@ -51,7 +51,7 @@ class OrderHistory
 
                         return [
                             'product' => $item->product?->name ?? '—',
-                            'package' => $item->packageLabel(),
+                            'package' => $allocation->describePackages($item),
                             'quantity' => (float) $allocation->quantity,
                             'unit' => $item->product?->unitLabel() ?? '',
                             'share_cents' => (int) $allocation->share_cents,

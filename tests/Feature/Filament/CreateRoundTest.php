@@ -32,7 +32,6 @@ it('saves the finances set in the wizard', function () {
             'lead_fee_percent' => 80,
             'platform_fee_percent' => 1.5,
             'pickup_location' => 'Bei mir',
-            'pickupDates' => [['scheduled_at' => now()->addDays(30)->format('Y-m-d H:i:s')]],
         ])
         ->call('create')
         ->assertHasFormErrors(['lead_fee_percent' => 'max'])
@@ -43,7 +42,8 @@ it('saves the finances set in the wizard', function () {
     $round = Round::where('title', 'Herbst')->firstOrFail();
 
     expect((float) $round->lead_fee_percent)->toBe(3.0)
-        ->and((float) $round->platform_fee_percent)->toBe(1.5);
+        ->and((float) $round->platform_fee_percent)->toBe(1.5)
+        ->and($round->shopping_deadline->toDateString())->toBe(now()->addDays(14)->toDateString());
 
     $undoRepeaterFake();
 });
@@ -54,4 +54,51 @@ it('fits into four steps, so the wizard header shows all of them', function () {
         ->assertSee('Eckdaten')
         ->assertSee('Finanzen')
         ->assertSee('Aufwandsentschädigung für den Lead');
+});
+
+it('saves the deadlines picked as single dates', function () {
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(CreateRound::class)
+        ->fillForm([
+            'title' => 'Winter',
+            'lead_fee_percent' => 2,
+            'platform_fee_percent' => 1,
+            'pickup_location' => 'Bei mir',
+            'shopping_deadline' => '2026-11-02',
+            'negotiation_deadline' => '2026-11-01',
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['negotiation_deadline' => 'after_or_equal'])
+        ->fillForm([
+            'negotiation_deadline' => '2026-11-09',
+            'finalization_deadline' => '2026-11-16',
+            'payment_deadline' => '2026-11-23',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $round = Round::where('title', 'Winter')->firstOrFail();
+
+    expect($round->shopping_deadline->toDateString())->toBe('2026-11-02')
+        ->and($round->negotiation_deadline->toDateString())->toBe('2026-11-09');
+
+    $undoRepeaterFake();
+});
+
+it('takes a deadline on the same day as the suggested one before it', function () {
+    $undoRepeaterFake = Repeater::fake();
+
+    Livewire::test(CreateRound::class)
+        ->fillForm([
+            'title' => 'Frühling',
+            'lead_fee_percent' => 2,
+            'platform_fee_percent' => 1,
+            'pickup_location' => 'Bei mir',
+            'negotiation_deadline' => now()->addDays(14)->toDateString(),
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $undoRepeaterFake();
 });

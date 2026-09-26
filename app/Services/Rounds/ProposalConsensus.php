@@ -18,7 +18,7 @@ final readonly class ProposalConsensus
 
     /**
      * A proposal may only be chosen when every stakeholder approved every
-     * item they receive a share of, and nobody excluded is still part of it.
+     * item they ordered, and nobody excluded still receives something.
      */
     public function isUnanimous(): bool
     {

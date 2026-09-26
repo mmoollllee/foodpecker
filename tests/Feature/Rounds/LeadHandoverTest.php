@@ -102,7 +102,7 @@ it('makes the creator of a round its lead', function () {
         ->fillForm([
             'title' => 'Herbst',
             'pickup_location' => 'Bei mir',
-            'pickupDates' => [['scheduled_at' => now()->addDays(30)->format('Y-m-d H:i:s')]],
+            'pickupDates' => [['window' => ['start' => '2026-12-05 10:00:00', 'end' => '2026-12-05 12:00:00']]],
             'lead_fee_percent' => 2,
             'platform_fee_percent' => 1,
         ])
@@ -114,7 +114,7 @@ it('makes the creator of a round its lead', function () {
     expect($round->lead_user_id)->toBe($this->lead->id)
         ->and($round->phase)->toBe(RoundPhase::Draft)
         ->and($round->participantFor($this->lead))->not->toBeNull()
-        ->and($round->pickupDates()->count())->toBe(1);
+        ->and($round->pickupDates()->sole()->label())->toBe('Sa. 05.12.2026 10:00–12:00');
 
     $undoRepeaterFake();
 });

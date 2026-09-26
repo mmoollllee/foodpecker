@@ -12,11 +12,11 @@ use App\Models\Attachment;
 use App\Models\CartItem;
 use App\Models\Group;
 use App\Models\GroupInvitation;
-use App\Models\Manufacturer;
 use App\Models\Note;
 use App\Models\PriceObservation;
 use App\Models\Product;
 use App\Models\Round;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Groups\GroupDissolution;
 use Filament\Actions\Testing\TestAction;
@@ -41,7 +41,7 @@ beforeEach(function () {
 /**
  * A document with a real file on the fake disk.
  */
-function attachDocument(Round|Product|Manufacturer $record, Group $group, User $user): Attachment
+function attachDocument(Round|Product|Supplier $record, Group $group, User $user): Attachment
 {
     $path = 'attachments/'.$group->id.'/'.fake()->uuid().'.pdf';
     Storage::disk('local')->put($path, 'PDF');
@@ -87,7 +87,7 @@ it('deletes private catalog entries nobody else uses, including their files', fu
     app(GroupDissolution::class)->dissolve($this->group, $this->owner);
 
     expect(Product::withTrashed()->find($product->id))->toBeNull()
-        ->and(Manufacturer::find($product->manufacturer_id))->toBeNull()
+        ->and(Supplier::find($product->supplier_id))->toBeNull()
         ->and(PriceObservation::count())->toBe(0)
         ->and(Activity::where('subject_type', Product::class)->where('subject_id', $product->id)->exists())->toBeFalse();
 
@@ -97,7 +97,7 @@ it('deletes private catalog entries nobody else uses, including their files', fu
 
 it('hands shared catalog entries over to the community', function () {
     $product = productWithTier($this->group);
-    $product->manufacturer->update(['visibility' => Visibility::Public]);
+    $product->supplier->update(['visibility' => Visibility::Public]);
     $product->update(['visibility' => Visibility::Public]);
     PriceObservation::create(['product_id' => $product->id, 'group_id' => $this->group->id, 'observed_price_cents' => 3000, 'package_amount' => 10, 'observed_on' => now()]);
 
@@ -109,7 +109,7 @@ it('hands shared catalog entries over to the community', function () {
         ->and($product->group_id)->toBeNull()
         ->and($product->priceTiers)->toHaveCount(1)
         ->and($product->priceObservations()->count())->toBe(1)
-        ->and($product->manufacturer->group_id)->toBeNull()
+        ->and($product->supplier->group_id)->toBeNull()
         ->and($product->activities()->where('action', 'ownership_released')->first()?->describeAction())
         ->toContain('gehört jetzt allen Gruppen');
 
@@ -120,7 +120,7 @@ it('hands shared catalog entries over to the community', function () {
 
 it('lets the first group that maintains a community entry take it over', function () {
     $product = productWithTier($this->group);
-    $product->manufacturer->update(['visibility' => Visibility::Public]);
+    $product->supplier->update(['visibility' => Visibility::Public]);
     $product->update(['visibility' => Visibility::Public]);
 
     app(GroupDissolution::class)->dissolve($this->group, $this->owner);
@@ -148,17 +148,17 @@ it('keeps private products another group already ordered, archived', function ()
     expect($product)->not->toBeNull()
         ->and($product->trashed())->toBeTrue()
         ->and($product->group_id)->toBeNull()
-        ->and($product->manufacturer)->not->toBeNull()
+        ->and($product->supplier)->not->toBeNull()
         ->and($cartItem->fresh()->product->is($product))->toBeTrue();
 });
 
-it('keeps a private manufacturer while another group still has products of it', function () {
-    $manufacturer = Manufacturer::factory()->create(['group_id' => $this->group->id]);
-    $foreignProduct = Product::factory()->create(['group_id' => $this->otherGroup->id, 'manufacturer_id' => $manufacturer->id]);
+it('keeps a private supplier while another group still has products of it', function () {
+    $supplier = Supplier::factory()->create(['group_id' => $this->group->id]);
+    $foreignProduct = Product::factory()->create(['group_id' => $this->otherGroup->id, 'supplier_id' => $supplier->id]);
 
     app(GroupDissolution::class)->dissolve($this->group, $this->owner);
 
-    expect(Manufacturer::find($manufacturer->id)?->group_id)->toBeNull()
+    expect(Supplier::find($supplier->id)?->group_id)->toBeNull()
         ->and(Product::find($foreignProduct->id))->not->toBeNull();
 });
 
@@ -286,7 +286,7 @@ it('sends the owner to another of their groups afterwards', function () {
 
 it('previews which catalog entries go away and which stay', function () {
     $shared = productWithTier($this->group);
-    $shared->manufacturer->update(['visibility' => Visibility::Public]);
+    $shared->supplier->update(['visibility' => Visibility::Public]);
     $shared->update(['visibility' => Visibility::Public]);
     productWithTier($this->group);
 
@@ -295,8 +295,8 @@ it('previews which catalog entries go away and which stay', function () {
         'members' => 3,
         'deleted_products' => 1,
         'kept_products' => 1,
-        'deleted_manufacturers' => 1,
-        'kept_manufacturers' => 1,
+        'deleted_suppliers' => 1,
+        'kept_suppliers' => 1,
     ]);
 
     actingInGroup($this->owner, $this->group);
@@ -304,7 +304,7 @@ it('previews which catalog entries go away and which stay', function () {
     Livewire::test(EditGroupProfile::class)
         ->mountAction('dissolveGroup')
         ->assertMountedActionModalSee([
-            '1 Produkt und 1 Hersteller, die nur eure Gruppe nutzt',
-            '1 Produkt und 1 Hersteller, die ihr geteilt habt',
+            '1 Produkt und 1 Lieferant, die nur eure Gruppe nutzt',
+            '1 Produkt und 1 Lieferant, die ihr geteilt habt',
         ]);
 });

@@ -1,248 +1,188 @@
 <?php
 
-use App\Models\CartItem;
-use App\Models\Group;
-use App\Models\Manufacturer;
-use App\Models\PriceTier;
-use App\Models\Product;
-use App\Models\Round;
-use App\Models\User;
+use App\Services\Distribution\Demand;
 use App\Services\Distribution\Distributor;
-use App\Services\Distribution\PackageSpec;
+use App\Services\Distribution\PackageOption;
 
-beforeEach(function () {
-    $this->distributor = new Distributor;
-
-    $owner = User::factory()->create();
-    $this->group = Group::create(['name' => 'Test', 'slug' => 'test-'.uniqid(), 'owner_id' => $owner->id]);
-    $manufacturer = Manufacturer::create([
-        'group_id' => $this->group->id, 'visibility' => 'private',
-        'name' => 'Hersteller', 'slug' => 'h-'.uniqid(), 'created_by_user_id' => $owner->id,
-    ]);
-    $this->product = Product::create([
-        'manufacturer_id' => $manufacturer->id,
-        'group_id' => $this->group->id,
-        'visibility' => 'private',
-        'name' => 'Reis', 'slug' => 'reis-'.uniqid(),
-        'unit' => 'kg',
-        'packaging_strategy' => 'tiered',
-        'created_by_user_id' => $owner->id,
-    ]);
-    $this->round = Round::create([
-        'group_id' => $this->group->id,
-        'lead_user_id' => $owner->id,
-        'title' => 'Test', 'phase' => 'shopping',
-    ]);
-});
-
-/** Helper: schnell ein Cart-Item bauen */
-function buildCartItem($round, $product, string $mode, ?float $exact = null, ?float $min = null, ?float $max = null): CartItem
+function package(int $tierId, float $amount, int $priceCents, int $minOrder = 1, bool $available = true): PackageOption
 {
-    return CartItem::create([
-        'round_id' => $round->id,
-        'user_id' => User::factory()->create()->id,
-        'product_id' => $product->id,
-        'quantity_mode' => $mode,
-        'exact_quantity' => $exact,
-        'min_quantity' => $min,
-        'max_quantity' => $max,
-    ]);
+    return new PackageOption($tierId, rtrim(rtrim(number_format($amount, 3, ',', ''), '0'), ',').' kg', $amount, $priceCents, $priceCents, $minOrder, null, $available);
 }
 
-it('rundet die Gesamtmenge auf das nächste Gebinde auf — teilbare Tier', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '25 kg', 'package_amount' => 25.0,
-        'price_cents' => 5500, 'is_divisible' => true, 'divisible_step' => 0.5,
-    ]);
-
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'exact', 5),
-        buildCartItem($this->round, $this->product, 'exact', 8),
-        buildCartItem($this->round, $this->product, 'flexible', null, 3, 12),
-    ]);
-
-    $r = $this->distributor->compute($items, $tier);
-
-    expect($r->packagesOrdered)->toBe(1)
-        ->and($r->totalQuantity)->toBe(25.0)
-        ->and($r->feasible)->toBeTrue();
-
-    $sum = collect($r->allocations)->sum('allocatedQuantity');
-    expect(abs($sum - 25.0))->toBeLessThan(0.001);
+beforeEach(function () {
+    $this->distributor = app(Distributor::class);
 });
 
-it('verteilt die Restmenge proportional auf flexible Teilnehmer', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '10 kg', 'package_amount' => 10.0,
-        'price_cents' => 2800, 'is_divisible' => true, 'divisible_step' => 1.0,
-    ]);
+it('fills the packages up with the flexible wishes', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 5, 5),
+        new Demand(2, 8, 8),
+        new Demand(3, 3, 12),
+    ], [package(1, 25, 5500)], portionSize: 0.5, unit: 'kg');
 
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'flexible', null, 2, 6),
-        buildCartItem($this->round, $this->product, 'flexible', null, 2, 6),
-    ]);
-
-    $r = $this->distributor->compute($items, $tier);
-
-    // Min = 4, gerundet auf 10 → +6 zu verteilen, je 3 pro Person
-    expect($r->packagesOrdered)->toBe(1);
-    expect(collect($r->allocations)->map(fn ($a) => $a->allocatedQuantity)->all())
-        ->each(fn ($q) => $q->toBe(5.0));
+    expect($result->mix->describe())->toBe('1 × 25 kg')
+        ->and($result->allocationFor(3)->allocatedQuantity)->toBe(12.0)
+        ->and($result->sumAllocated())->toBe(25.0)
+        ->and($result->fits())->toBeTrue();
 });
 
-it('respektiert "exakte Menge" und gibt Rest an Flexible', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '25 kg', 'package_amount' => 25.0,
-        'price_cents' => 5500, 'is_divisible' => true, 'divisible_step' => 0.5,
-    ]);
+it('spreads the rest in proportion to the flexibility', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 2, 6),
+        new Demand(2, 2, 6),
+    ], [package(1, 10, 2800)], portionSize: 1, unit: 'kg');
 
-    $exact = buildCartItem($this->round, $this->product, 'exact', 12);
-    $flex = buildCartItem($this->round, $this->product, 'flexible', null, 5, 20);
-
-    $r = $this->distributor->compute(collect([$exact, $flex]), $tier);
-
-    $exactAlloc = collect($r->allocations)->firstWhere('userId', $exact->user_id);
-    $flexAlloc = collect($r->allocations)->firstWhere('userId', $flex->user_id);
-
-    expect($exactAlloc->allocatedQuantity)->toBe(12.0);
-    expect($flexAlloc->allocatedQuantity)->toBe(13.0); // 25 - 12
-    expect($r->feasible)->toBeTrue();
+    expect($result->allocationFor(1)->allocatedQuantity)->toBe(5.0)
+        ->and($result->allocationFor(2)->allocatedQuantity)->toBe(5.0);
 });
 
-it('snappt Allokationen auf den divisible_step', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '5 kg', 'package_amount' => 5.0,
-        'price_cents' => 1500, 'is_divisible' => true, 'divisible_step' => 0.5,
-    ]);
+it('hands out portions only', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 1, 3),
+        new Demand(2, 1, 3),
+        new Demand(3, 1, 3),
+    ], [package(1, 5, 1500)], portionSize: 0.5, unit: 'kg');
 
-    // 3 flexible Items, je 1..3 kg, Ziel = 5 kg, Slack je 2 = total 6, share je (2/6)*2 = 0.66
-    // snap auf 0.5 → 0.5 pro Person, Rest 0.5 fließt zur ersten mit Slack
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'flexible', null, 1, 3),
-        buildCartItem($this->round, $this->product, 'flexible', null, 1, 3),
-        buildCartItem($this->round, $this->product, 'flexible', null, 1, 3),
-    ]);
-
-    $r = $this->distributor->compute($items, $tier);
-
-    expect($r->packagesOrdered)->toBe(1);
-    foreach ($r->allocations as $alloc) {
-        // Jede Allokation muss ein Vielfaches von 0.5 sein
-        $remainder = fmod($alloc->allocatedQuantity, 0.5);
-        expect(abs($remainder) < 0.001 || abs($remainder - 0.5) < 0.001)->toBeTrue();
-    }
-    expect(collect($r->allocations)->sum('allocatedQuantity'))->toBe(5.0);
+    expect(collect($result->allocations)->pluck('allocatedQuantity')->all())->toBe([2.0, 1.5, 1.5]);
 });
 
-it('teilt nicht-teilbare Pakete in ganzen Einheiten zu', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '2 kg', 'package_amount' => 2.0,
-        'price_cents' => 740, 'is_divisible' => false,
-    ]);
+it('combines package sizes to match the wished amount exactly', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 12, 12),
+        new Demand(2, 5, 5),
+    ], [package(1, 10, 2100), package(2, 5, 1100), package(3, 1, 240)], portionSize: 0.5, unit: 'kg');
 
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'exact', 4),     // 2 Pakete
-        buildCartItem($this->round, $this->product, 'exact', 2),     // 1 Paket
-        buildCartItem($this->round, $this->product, 'flexible', null, 0, 6), // 0–3 Pakete
-    ]);
-
-    $r = $this->distributor->compute($items, $tier);
-
-    // Mindestens 2+1+0 = 3 Pakete, allokiert in ganzen 2-kg-Einheiten
-    expect($r->packagesOrdered)->toBeGreaterThanOrEqual(3);
-    foreach ($r->allocations as $alloc) {
-        $remainder = fmod($alloc->allocatedQuantity, 2.0);
-        expect(abs($remainder) < 0.001 || abs($remainder - 2.0) < 0.001)->toBeTrue();
-    }
+    expect($result->mix->describe())->toBe('1 × 10 kg, 1 × 5 kg, 2 × 1 kg')
+        ->and($result->totalPriceCents())->toBe(3680)
+        ->and($result->overhang)->toBe(0.0)
+        ->and($result->fits())->toBeTrue();
 });
 
-it('verteilt die Preisanteile auf Cent genau', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '10 kg', 'package_amount' => 10.0,
-        'price_cents' => 2800, 'is_divisible' => true, 'divisible_step' => 0.5,
-    ]);
+it('splits the price in proportion to the amounts, exact to the cent', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 12, 12),
+        new Demand(2, 5, 5),
+    ], [package(1, 10, 2100), package(2, 5, 1100), package(3, 1, 240)], portionSize: 0.5);
 
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'exact', 5),
-        buildCartItem($this->round, $this->product, 'exact', 5),
-    ]);
-
-    $r = $this->distributor->compute($items, $tier);
-
-    expect(collect($r->allocations)->sum('shareCents'))->toBe(2800);
+    expect($result->allocationFor(1)->shareCents)->toBe(2598)
+        ->and($result->allocationFor(2)->shareCents)->toBe(1082);
 });
 
-it('liefert leere Allokation für leeren Warenkorb', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '10 kg', 'package_amount' => 10.0,
-        'price_cents' => 2800, 'is_divisible' => true,
-    ]);
+it('keeps amounts set by hand and distributes the rest', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 5, 15),
+        new Demand(2, 5, 15, manualQuantity: 10),
+    ], [package(1, 25, 4800)], portionSize: 0.5, unit: 'kg');
 
-    $r = $this->distributor->compute(collect(), $tier);
-
-    expect($r->packagesOrdered)->toBe(0)
-        ->and($r->allocations)->toBe([])
-        ->and($r->feasible)->toBeTrue();
+    expect($result->allocationFor(2)->allocatedQuantity)->toBe(10.0)
+        ->and($result->allocationFor(2)->manual)->toBeTrue()
+        ->and($result->allocationFor(1)->allocatedQuantity)->toBe(15.0);
 });
 
-it('distributes a package count chosen by the lead and reports the leftover', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '10 kg', 'package_amount' => 10.0,
-        'price_cents' => 3000, 'is_divisible' => true, 'divisible_step' => 1,
-    ]);
+it('reports a shortfall when more is handed out by hand than ordered', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 5, 15, manualQuantity: 20),
+        new Demand(2, 5, 15, manualQuantity: 10),
+    ], [package(1, 25, 4800)], portionSize: 0.5, unit: 'kg', fixedCounts: [1 => 1]);
 
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'exact', 6),
-        buildCartItem($this->round, $this->product, 'flexible', null, 2, 8),
-    ]);
+    expect($result->shortfall)->toBe(5.0)
+        ->and($result->notes)->toContain('Es sind 5 kg mehr verteilt als bestellt.');
+});
 
-    $result = $this->distributor->compute($items, $tier, packages: 2);
+it('distributes a package count fixed by hand and reports the leftover', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 6, 6),
+        new Demand(2, 2, 8),
+    ], [package(1, 10, 3000)], portionSize: 1, unit: 'kg', fixedCounts: [1 => 2]);
 
-    expect($result->packagesOrdered)->toBe(2)
-        ->and($result->totalPriceCents)->toBe(6000)
+    expect($result->totalPriceCents())->toBe(6000)
         ->and($result->sumAllocated())->toBe(14.0)
-        ->and($result->unallocatedQuantity)->toBe(6.0)
-        ->and($result->feasible)->toBeFalse()
+        ->and($result->overhang)->toBe(6.0)
+        ->and($result->fits())->toBeFalse()
         ->and(collect($result->allocations)->sum('shareCents'))->toBe(6000);
 });
 
 it('cuts the wishes in proportion when fewer packages are ordered than wanted', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '10 kg', 'package_amount' => 10.0,
-        'price_cents' => 3000, 'is_divisible' => true, 'divisible_step' => 1,
-    ]);
-
-    $items = collect([
-        buildCartItem($this->round, $this->product, 'exact', 10),
-        buildCartItem($this->round, $this->product, 'exact', 10),
-    ]);
-
-    $result = $this->distributor->compute($items, $tier, packages: 1);
+    $result = $this->distributor->distribute([
+        new Demand(1, 10, 10),
+        new Demand(2, 10, 10),
+    ], [package(1, 10, 3000)], portionSize: 1, unit: 'kg', fixedCounts: [1 => 1]);
 
     expect(collect($result->allocations)->pluck('allocatedQuantity')->all())->toBe([5.0, 5.0])
-        ->and($result->feasible)->toBeFalse()
         ->and($result->notes)->toContain('Es fehlen 10 kg zu den Mindestwünschen.');
 });
 
-it('uses a negotiated package price', function () {
-    $tier = PriceTier::create([
-        'product_id' => $this->product->id,
-        'label' => '5 kg', 'package_amount' => 5.0,
-        'price_cents' => 1850, 'is_divisible' => true, 'divisible_step' => 0.1,
-    ]);
+it('rounds the flexible shares to a coarser step', function () {
+    $demands = [new Demand(1, 1, 4), new Demand(2, 1, 2)];
 
-    $items = collect([buildCartItem($this->round, $this->product, 'exact', 5)]);
+    $fine = $this->distributor->distribute($demands, [package(1, 5, 1850)], portionSize: 0.1);
+    $rounded = $this->distributor->distribute($demands, [package(1, 5, 1850)], portionSize: 0.1, roundingStep: 0.5);
 
-    $result = $this->distributor->compute($items, PackageSpec::fromTier($tier, 1600));
+    expect(collect($fine->allocations)->pluck('allocatedQuantity')->all())->toBe([3.3, 1.7])
+        ->and(collect($rounded->allocations)->pluck('allocatedQuantity')->all())->toBe([3.5, 1.5]);
+});
 
-    expect($result->totalPriceCents)->toBe(1600);
+it('gives everybody their own whole packages of the best fitting sizes', function () {
+    $small = package(1, 0.25, 110);
+    $large = package(2, 2, 740);
+
+    $result = $this->distributor->distribute([
+        new Demand(1, 2.5, 2.5),
+        new Demand(2, 1, 1, preferredTierId: 1),
+    ], [$small, $large], portionSize: null, unit: 'kg');
+
+    expect($result->allocationFor(1)->packageCounts)->toBe([2 => 1, 1 => 2])
+        ->and($result->allocationFor(1)->shareCents)->toBe(960)
+        ->and($result->allocationFor(2)->packageCounts)->toBe([1 => 4])
+        ->and($result->allocationFor(2)->shareCents)->toBe(440)
+        ->and($result->mix->describe())->toBe('1 × 2 kg, 6 × 0,25 kg');
+});
+
+it('orders the minimum of a size and spreads the cost of the extra packages', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 2, 2),
+        new Demand(2, 1, 1),
+    ], [package(1, 1, 300, minOrder: 5)], portionSize: null, unit: 'kg');
+
+    expect($result->mix->describe())->toBe('5 × 1 kg')
+        ->and($result->overhang)->toBe(2.0)
+        ->and($result->allocationFor(1)->shareCents)->toBe(1000)
+        ->and($result->allocationFor(2)->shareCents)->toBe(500);
+});
+
+it('leaves out sizes the supplier can not deliver', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 25, 25),
+    ], [package(1, 25, 5000, available: false), package(2, 10, 2800)], portionSize: 0.5);
+
+    expect($result->mix->describe())->toBe('3 × 10 kg');
+});
+
+it('orders nothing when no size can be delivered', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 25, 25),
+    ], [package(1, 25, 5000, available: false)], portionSize: 0.5);
+
+    expect($result->mix->isEmpty())->toBeTrue()
+        ->and($result->notes)->toContain('Keine Gebindegröße ist lieferbar.');
+});
+
+it('returns nothing without wishes', function () {
+    $result = $this->distributor->distribute([], [package(1, 10, 2800)], portionSize: 0.5);
+
+    expect($result->allocations)->toBe([])
+        ->and($result->mix->isEmpty())->toBeTrue();
+});
+
+it('hands packages a minimum order adds to people who still have room first', function () {
+    $result = $this->distributor->distribute([
+        new Demand(1, 1, 5),
+        new Demand(2, 1, 1),
+    ], [package(1, 0.5, 200, minOrder: 10)], portionSize: null, unit: 'kg');
+
+    expect($result->mix->describe())->toBe('10 × 0,5 kg')
+        ->and($result->allocationFor(1)->allocatedQuantity)->toBe(4.0)
+        ->and($result->allocationFor(2)->allocatedQuantity)->toBe(1.0)
+        ->and($result->overhang)->toBe(0.0)
+        ->and([$result->allocationFor(1)->shareCents, $result->allocationFor(2)->shareCents])->toBe([1600, 400]);
 });

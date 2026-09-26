@@ -25,7 +25,7 @@ enum RoundPhase: string implements HasColor, HasIcon, HasLabel
         return match ($this) {
             self::Draft => 'Entwurf',
             self::Shopping => 'Einkauf',
-            self::Negotiating => 'Verhandlung',
+            self::Negotiating => 'Anpassung',
             self::Finalizing => 'Bestätigung',
             self::Payment => 'Zahlung',
             self::Ordering => 'Bestellung',

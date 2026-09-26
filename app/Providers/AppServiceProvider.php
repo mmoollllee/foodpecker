@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\User;
+use CodeWithKyrian\FilamentDateRange\Forms\Components\DateRangePicker;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -28,6 +29,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Profile photos are visible to everybody sharing a group.
         UserProfile::authorizePhotoUsing(fn (User $viewer, User $owner): bool => $viewer->sharesGroupWith($owner));
+
+        // Dates can be typed as well as picked, like in the other apps.
+        DateRangePicker::configureUsing(fn (DateRangePicker $picker) => $picker->editableInputs()->weekStartsOnMonday());
     }
 
     /**

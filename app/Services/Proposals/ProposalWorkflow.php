@@ -37,8 +37,14 @@ class ProposalWorkflow
         $round = $proposal->round;
 
         $this->ensure($proposal->isDraft(), 'Nur Entwürfe können zur Abstimmung freigegeben werden.');
-        $this->ensure($this->isVotingPhase($round), 'Vorschläge können nur in der Verhandlungs- oder Bestätigungsphase freigegeben werden.');
+        $this->ensure($this->isVotingPhase($round), 'Vorschläge können nur in der Anpassungs- oder Bestätigungsphase freigegeben werden.');
         $this->ensure($proposal->items()->exists(), 'Der Vorschlag hat noch keine Positionen.');
+
+        $problem = $proposal->items()->with(['packages', 'allocations', 'product'])->get()
+            ->map(fn (ProposalItem $item): ?string => $item->blockingProblem())
+            ->filter()
+            ->first();
+        $this->ensure($problem === null, (string) $problem);
         $this->ensure(
             $this->consensus->evaluate($proposal)->excludedStakeholderIds === [],
             'Der Vorschlag enthält ausgeschlossene Teilnehmer — bitte eine neue Version erstellen.',
@@ -179,7 +185,7 @@ class ProposalWorkflow
         }
 
         if ($parts === []) {
-            return 'Mindestens eine Position hat niemanden, der sie bekommt — bitte den Vorschlag anpassen.';
+            return 'Mindestens eine Position hat niemanden, der darüber entscheidet — bitte den Vorschlag anpassen.';
         }
 
         return 'Noch nicht einstimmig: '.implode('; ', $parts).'.';

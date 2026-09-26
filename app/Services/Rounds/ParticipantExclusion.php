@@ -18,7 +18,7 @@ use Illuminate\Validation\ValidationException;
  * while preparing a new version, the lead may exclude somebody from the
  * order. The person stays a group member and can join later rounds.
  * Drafts are recalculated without them; proposals that are up for a vote
- * can't change anymore and are withdrawn.
+ * and give them something can't change anymore and are withdrawn.
  */
 class ParticipantExclusion
 {
@@ -54,7 +54,7 @@ class ParticipantExclusion
         $reason = trim($reason);
         $participant = $round->participantFor($user);
 
-        $this->ensure(in_array($round->phase, self::PHASES, true), 'Ausschließen geht nur, während ein neuer Vorschlag vorbereitet wird — in der Verhandlungs- oder Bestätigungsphase.');
+        $this->ensure(in_array($round->phase, self::PHASES, true), 'Ausschließen geht nur, während ein neuer Vorschlag vorbereitet wird — in der Anpassungs- oder Bestätigungsphase.');
         $this->ensure(! $round->isLead($user), 'Der Lead kann nicht ausgeschlossen werden.');
         $this->ensure($participant !== null && ! $participant->removed, 'Diese Person nimmt nicht (mehr) an der Runde teil.');
         $this->ensure(mb_strlen($reason) >= self::MIN_REASON_LENGTH, 'Bitte gib einen Grund für den Ausschluss an.');
@@ -67,13 +67,13 @@ class ParticipantExclusion
                 'removed_by_user_id' => $by->id,
             ]);
 
-            [$drafts, $voted] = $round->proposals()
-                ->whereIn('status', [ProposalStatus::Draft->value, ProposalStatus::Published->value, ProposalStatus::Chosen->value])
+            $voted = $round->proposals()
+                ->whereIn('status', [ProposalStatus::Published->value, ProposalStatus::Chosen->value])
                 ->whereHas('allocations', fn ($query) => $query
                     ->where('proposal_allocations.user_id', $user->id)
                     ->where('proposal_allocations.quantity', '>', 0))
-                ->get()
-                ->partition(fn (OrderProposal $proposal): bool => $proposal->isDraft());
+                ->get();
+            $drafts = $round->proposals()->where('status', ProposalStatus::Draft->value)->get();
 
             $chosenProposalId = $round->newQuery()->whereKey($round->id)->value('chosen_proposal_id');
 
@@ -136,7 +136,7 @@ class ParticipantExclusion
     public function candidatesFor(OrderProposal $draft): array
     {
         $round = $draft->round;
-        $inDraft = $draft->includedUserIds()->all();
+        $inDraft = $draft->stakeholderIds()->all();
         $excludedIds = $round->participants()->where('removed', true)->pluck('user_id')->map(fn ($userId): int => (int) $userId)->all();
         $disagreements = [];
 

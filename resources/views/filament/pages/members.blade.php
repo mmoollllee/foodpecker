@@ -123,22 +123,7 @@
                                     <td class="px-3 py-2">
                                         <div class="flex items-center justify-end gap-3">
                                             @unless ($invitation->isExpired())
-                                                <button
-                                                    type="button"
-                                                    x-data="{ copied: false }"
-                                                    x-on:click="
-                                                        const url = @js($invitation->acceptUrl());
-                                                        if (navigator.clipboard && window.isSecureContext) {
-                                                            navigator.clipboard.writeText(url).then(() => { copied = true; setTimeout(() => copied = false, 2000) });
-                                                        } else {
-                                                            window.prompt('Einladungslink kopieren (Strg/Cmd + C):', url);
-                                                        }
-                                                    "
-                                                    class="text-xs font-medium text-primary-600 underline hover:text-primary-500 dark:text-primary-400"
-                                                >
-                                                    <span x-show="! copied">Link kopieren</span>
-                                                    <span x-show="copied" x-cloak>✓ kopiert</span>
-                                                </button>
+                                                <x-foodpecker.copy-button :value="$invitation->acceptUrl()" label="Link kopieren" />
                                             @endunless
                                             <x-foodpecker.action :action="($this->resendInvitationAction)(['invitation' => $invitation->id])" />
                                             <x-foodpecker.action :action="($this->withdrawInvitationAction)(['invitation' => $invitation->id])" />

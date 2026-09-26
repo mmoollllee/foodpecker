@@ -129,9 +129,9 @@ class Group extends Model
         return $this->invitations()->whereNull('accepted_at');
     }
 
-    public function manufacturers(): HasMany
+    public function suppliers(): HasMany
     {
-        return $this->hasMany(Manufacturer::class);
+        return $this->hasMany(Supplier::class);
     }
 
     public function products(): HasMany

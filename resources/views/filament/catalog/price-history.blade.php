@@ -25,7 +25,7 @@
                 @foreach ($observations as $observation)
                     <tr>
                         <td class="py-2 pr-4">{{ $observation->observed_on->format('d.m.Y') }}</td>
-                        <td class="px-3 py-2">{{ rtrim(rtrim(number_format((float) $observation->package_amount, 3, ',', '.'), '0'), ',') }} {{ $product->unitLabel() }}</td>
+                        <td class="px-3 py-2">{{ \App\Models\CartItem::formatAmount((float) $observation->package_amount, $product->unitLabel()) }}</td>
                         <td class="px-3 py-2 text-right tabular-nums">{{ Money::format($observation->observed_price_cents) }}</td>
                         <td class="px-3 py-2 text-right tabular-nums">{{ number_format($observation->pricePerUnitCents() / 100, 2, ',', '.') }} €</td>
                         <td class="px-3 py-2 text-gray-500">{{ $observation->group_id === $tenant?->getKey() ? 'eure Gruppe' : 'andere Gruppe' }}</td>

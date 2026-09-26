@@ -2,33 +2,40 @@
 
 namespace App\Filament\Resources\Rounds\Pages\Concerns;
 
-use App\Enums\ProposalStatus;
+use App\Enums\NotificationKind;
+use App\Enums\ProductUnit;
 use App\Enums\RoundPhase;
 use App\Enums\VoteValue;
-use App\Filament\Forms\Components\MoneyInput;
+use App\Models\CartItem;
 use App\Models\OrderProposal;
 use App\Models\PriceTier;
 use App\Models\ProposalItem;
-use App\Services\Distribution\PackageSpec;
+use App\Services\Estimates\PriceEstimator;
+use App\Services\Estimates\RoundEstimate;
 use App\Services\Money\OrderCalculator;
 use App\Services\Money\ProposalTotals;
 use App\Services\Proposals\ProposalBuilder;
+use App\Services\Proposals\ProposalChanges;
+use App\Services\Proposals\ProposalComparison;
 use App\Services\Proposals\ProposalWorkflow;
 use App\Services\Rounds\ConsensusChecker;
 use App\Services\Rounds\ParticipantExclusion;
+use App\Services\Rounds\PhaseTransitioner;
 use App\Services\Rounds\ProposalConsensus;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
-use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Order proposals: creating, fine-tuning with negotiated prices, voting and
- * choosing the final order.
+ * Order proposals: the draft that calculates itself from the carts and the
+ * suppliers' feedback, corrections by hand, voting and choosing the final
+ * order.
  */
 trait InteractsWithProposals
 {
@@ -47,41 +54,36 @@ trait InteractsWithProposals
      */
     protected array $exclusionCandidatesCache = [];
 
+    /**
+     * @var array<int, ProposalChanges|null>
+     */
+    protected array $changesCache = [];
+
+    protected ?RoundEstimate $listPriceEstimate = null;
+
+    /**
+     * Normally the draft exists as soon as the adjustment phase starts —
+     * this brings it back, e.g. after it was deleted.
+     */
     public function createProposalAction(): Action
     {
         return Action::make('createProposal')
-            ->label('Vorschlag erstellen')
+            ->label('Bestellvorschlag erstellen')
             ->icon(Heroicon::OutlinedDocumentPlus)
             ->color('info')
-            ->visible(fn (): bool => $this->currentUser()->can('propose', $this->getRound()))
-            ->modalDescription('Der Vorschlag wird aus den aktuellen Warenkörben berechnet — mit der jeweils günstigsten passenden Gebindegröße. Preise, Gebindegrößen und Mengen kannst du danach pro Position anpassen, bevor du ihn zur Abstimmung freigibst.')
-            ->schema([
-                TextInput::make('title')
-                    ->label('Titel des Vorschlags')
-                    ->default(fn (): string => 'Vorschlag '.now()->format('d.m.'))
-                    ->required()
-                    ->maxLength(255),
-                Textarea::make('description')
-                    ->label('Begründung / Hinweise')
-                    ->rows(3)
-                    ->maxLength(2000),
-                MoneyInput::make('shipping_cents')
-                    ->label('Versandkosten gesamt')
-                    ->default(0)
-                    ->helperText('Werden gleichmäßig auf alle Beteiligten verteilt.'),
-            ])
-            ->action(function (array $data): void {
+            ->visible(fn (): bool => $this->getRound()->phase === RoundPhase::Negotiating
+                && $this->currentUser()->can('propose', $this->getRound())
+                && $this->draftForVote() === null)
+            ->requiresConfirmation()
+            ->modalDescription('Der Vorschlag wird aus den Warenkörben und den Rückmeldungen der Lieferanten berechnet. Mengen und Gebinde kannst du danach anpassen.')
+            ->action(function (): void {
                 $created = $this->attempt(
-                    fn () => app(ProposalBuilder::class)->createFromCarts($this->getRound(), $this->currentUser(), $data),
+                    fn () => app(ProposalBuilder::class)->createFromCarts($this->getRound(), $this->currentUser(), ['title' => 'Bestellvorschlag']),
                     'Vorschlag konnte nicht erstellt werden',
                 );
 
                 if ($created) {
-                    Notification::make()
-                        ->title('Vorschlag erstellt.')
-                        ->body('Pass Preise und Gebinde pro Position an und gib ihn dann zur Abstimmung frei.')
-                        ->success()
-                        ->send();
+                    Notification::make()->title('Bestellvorschlag erstellt.')->success()->send();
                 }
             });
     }
@@ -89,13 +91,12 @@ trait InteractsWithProposals
     public function editProposalAction(): Action
     {
         return Action::make('editProposal')
-            ->label('Bearbeiten')
+            ->label('Umbenennen')
             ->icon(Heroicon::OutlinedPencilSquare)
             ->color('gray')
             ->size('sm')
             ->visible(fn (array $arguments): bool => $this->canEditProposal($this->proposalFromArguments($arguments)))
-            ->modalHeading('Vorschlag bearbeiten')
-            ->fillForm(fn (array $arguments): array => $this->proposalFromArguments($arguments)?->only(['title', 'description', 'shipping_cents']) ?? [])
+            ->fillForm(fn (array $arguments): array => $this->proposalFromArguments($arguments)?->only(['title', 'description']) ?? [])
             ->schema([
                 TextInput::make('title')
                     ->label('Titel')
@@ -105,10 +106,6 @@ trait InteractsWithProposals
                     ->label('Begründung / Hinweise')
                     ->rows(3)
                     ->maxLength(2000),
-                MoneyInput::make('shipping_cents')
-                    ->label('Versandkosten gesamt')
-                    ->required()
-                    ->helperText('Werden gleichmäßig auf alle Beteiligten verteilt.'),
             ])
             ->action(function (array $data, array $arguments): void {
                 $this->proposalFromArguments($arguments)?->update($data);
@@ -118,108 +115,88 @@ trait InteractsWithProposals
             });
     }
 
-    public function editProposalItemAction(): Action
+    /**
+     * How many packages of each size are ordered — the cheapest combination
+     * unless fixed by hand.
+     */
+    public function editPackagesAction(): Action
     {
-        return Action::make('editProposalItem')
-            ->label('Anpassen')
+        return Action::make('editPackages')
+            ->label('Gebinde ändern')
             ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
             ->color('gray')
             ->link()
             ->size('xs')
-            ->visible(fn (array $arguments): bool => $this->canEditProposal($this->proposalItemFromArguments($arguments)?->proposal))
-            ->modalHeading(fn (array $arguments): string => 'Position anpassen: '.($this->proposalItemFromArguments($arguments)?->product?->name ?? ''))
-            ->modalWidth('3xl')
-            ->modalContent(fn (array $arguments): ?View => $this->tierComparisonView($this->proposalItemFromArguments($arguments)))
+            ->visible(function (array $arguments): bool {
+                $item = $this->proposalItemFromArguments($arguments);
+
+                return $item !== null && $item->isPortioned() && $this->canEditProposal($item->proposal);
+            })
+            ->modalHeading(fn (array $arguments): string => 'Gebinde: '.($this->proposalItemFromArguments($arguments)?->product?->name ?? ''))
+            ->modalDescription('Foodpecker sucht die günstigste Kombination der Gebindegrößen. Hier kannst du die Anzahl selbst festlegen — die Mengen werden dann neu verteilt.')
+            ->modalWidth('lg')
             ->fillForm(function (array $arguments): array {
                 $item = $this->proposalItemFromArguments($arguments);
 
                 return [
-                    'price_tier_id' => $item?->price_tier_id,
-                    'packages' => $item?->packages_ordered,
-                    'package_price_cents' => $item?->package_price_cents,
+                    'automatic' => ! $item?->packages_fixed,
+                    'counts' => $item?->product?->priceTiers
+                        ->mapWithKeys(fn (PriceTier $tier): array => [$tier->id => $item->packages->firstWhere('price_tier_id', $tier->id)?->count ?? 0])
+                        ->all() ?? [],
                 ];
             })
-            ->schema(function (array $arguments): array {
-                $item = $this->proposalItemFromArguments($arguments);
-
-                return [
-                    Select::make('price_tier_id')
-                        ->label('Gebindegröße')
-                        ->options(fn (): array => $item?->product?->priceTiers
-                            ->mapWithKeys(fn (PriceTier $tier): array => [$tier->id => $tier->label.' · Listenpreis '.$tier->formattedPrice()])
-                            ->all() ?? [])
-                        ->placeholder($item?->packageLabel() ?? '—')
-                        ->live()
-                        ->afterStateUpdated(function (?string $state, Set $set): void {
-                            $tier = PriceTier::find($state);
-
-                            if ($tier) {
-                                $set('package_price_cents', $tier->price_cents);
-                                $set('packages', null);
-                            }
-                        }),
-                    TextInput::make('packages')
-                        ->label('Anzahl Gebinde')
-                        ->integer()
-                        ->minValue(1)
-                        ->maxValue(9999)
-                        ->placeholder('automatisch aus den Warenkörben')
-                        ->helperText('Leer lassen, um die Anzahl aus den Wünschen zu berechnen.'),
-                    MoneyInput::make('package_price_cents')
-                        ->label('Verhandelter Preis pro Gebinde')
-                        ->required()
-                        ->helperText('Nur für diese Runde — die Produktdaten bleiben unverändert.'),
-                ];
-            })
+            ->schema(fn (array $arguments): array => [
+                Toggle::make('automatic')
+                    ->label('Automatisch die günstigste Kombination')
+                    ->live(),
+                Grid::make(2)
+                    ->schema($this->proposalItemFromArguments($arguments)?->product?->priceTiers
+                        ->map(fn (PriceTier $tier): TextInput => TextInput::make('counts.'.$tier->id)
+                            ->label($tier->label)
+                            ->integer()
+                            ->minValue(0)
+                            ->maxValue(999)
+                            ->suffix('×'))
+                        ->all() ?? [])
+                    ->visible(fn (Get $get): bool => ! $get('automatic')),
+            ])
             ->action(function (array $data, array $arguments): void {
                 $item = $this->proposalItemFromArguments($arguments);
+                $counts = $data['automatic'] ? null : array_map('intval', $data['counts'] ?? []);
 
-                if (! $item) {
-                    return;
-                }
-
-                $tier = filled($data['price_tier_id'] ?? null)
-                    ? $item->product?->priceTiers->firstWhere('id', (int) $data['price_tier_id'])
-                    : null;
-
-                $spec = ($tier ? PackageSpec::fromTier($tier) : $item->toPackageSpec())
-                    ->withPrice((int) $data['package_price_cents']);
-
-                $packages = filled($data['packages'] ?? null) ? (int) $data['packages'] : null;
-
-                $updated = $this->attempt(
-                    fn () => app(ProposalBuilder::class)->updateItem($item, $spec, $packages),
-                    'Position konnte nicht angepasst werden',
-                );
-
-                if ($updated) {
-                    Notification::make()->title('Position neu berechnet.')->success()->send();
+                if ($item && $this->attempt(fn () => app(ProposalBuilder::class)->setPackageCounts($item, $counts), 'Gebinde nicht geändert')) {
+                    Notification::make()->title('Gebinde übernommen, Mengen neu verteilt.')->success()->send();
                 }
             });
     }
 
-    public function publishProposalAction(): Action
+    /**
+     * Rounds the flexible shares of every position in a draft to
+     * friendlier amounts — half kilograms, 100 grams.
+     */
+    public function roundProposalAction(): Action
     {
-        return Action::make('publishProposal')
-            ->label('Zur Abstimmung freigeben')
-            ->icon(Heroicon::OutlinedMegaphone)
-            ->color('info')
+        return Action::make('roundProposal')
+            ->label('Mengen runden')
+            ->icon(Heroicon::OutlinedCalculator)
+            ->color('gray')
             ->size('sm')
-            ->visible(fn (array $arguments): bool => $this->canEditProposal($this->proposalFromArguments($arguments))
-                && in_array($this->getRound()->phase, [RoundPhase::Negotiating, RoundPhase::Finalizing], true))
-            ->requiresConfirmation()
-            ->modalHeading('Zur Abstimmung freigeben?')
-            ->modalDescription('Danach lässt sich der Vorschlag nicht mehr ändern — für Änderungen erstellst du eine neue Version.')
+            ->tooltip('Flexible Mengen auf glattere Werte runden, z. B. 0,5 kg')
+            ->visible(fn (array $arguments): bool => $this->canEditProposal($proposal = $this->proposalFromArguments($arguments))
+                && $proposal->items->contains(fn (ProposalItem $item): bool => $this->defaultRounding($item) !== null))
             ->action(function (array $arguments): void {
                 $proposal = $this->proposalFromArguments($arguments);
 
-                $published = $proposal && $this->attempt(
-                    fn () => app(ProposalWorkflow::class)->publish($proposal, $this->currentUser()),
-                    'Freigabe nicht möglich',
-                );
+                $rounded = $proposal && $this->attempt(function () use ($proposal): void {
+                    foreach ($proposal->items as $item) {
+                        if (($step = $this->defaultRounding($item)) !== null) {
+                            app(ProposalBuilder::class)->setRounding($item, $step);
+                        }
+                    }
+                }, 'Runden nicht möglich');
 
-                if ($published) {
-                    Notification::make()->title('Vorschlag ist zur Abstimmung freigegeben.')->success()->send();
+                if ($rounded) {
+                    Notification::make()->title('Mengen gerundet.')->body('Pro Position lässt sich die Rundung einzeln ändern.')->success()->send();
                 }
             });
     }
@@ -235,7 +212,7 @@ trait InteractsWithProposals
                 $proposal = $this->proposalFromArguments($arguments);
 
                 return $proposal !== null
-                    && in_array($proposal->status, [ProposalStatus::Draft, ProposalStatus::Published], true)
+                    && $proposal->isPublished()
                     && ($proposal->isProposedBy($this->currentUser()) || $this->canManage());
             })
             ->modalHeading('Vorschlag zurückziehen?')
@@ -264,7 +241,7 @@ trait InteractsWithProposals
         return Action::make('deleteProposal')
             ->label('Löschen')
             ->icon(Heroicon::OutlinedTrash)
-            ->color('danger')
+            ->color('gray')
             ->size('sm')
             ->visible(fn (array $arguments): bool => $this->canEditProposal($this->proposalFromArguments($arguments)))
             ->requiresConfirmation()
@@ -283,14 +260,18 @@ trait InteractsWithProposals
             });
     }
 
+    /**
+     * Counter-proposals and new versions start as a copy — with the prices
+     * the suppliers confirmed and the corrections made so far.
+     */
     public function newProposalVersionAction(): Action
     {
         return Action::make('newProposalVersion')
-            ->label('Neue Version')
+            ->label(fn (): string => $this->canManage() ? 'Neue Version' : 'Gegenvorschlag machen')
             ->icon(Heroicon::OutlinedDocumentDuplicate)
             ->color('gray')
             ->size('sm')
-            ->tooltip('Übernimmt Gebinde und verhandelte Preise und rechnet mit den aktuellen Warenkörben neu — ohne ausgeschlossene Teilnehmer.')
+            ->tooltip('Übernimmt Gebinde, Preise und Korrekturen und rechnet mit den aktuellen Warenkörben neu — ohne ausgeschlossene Teilnehmer.')
             ->visible(function (array $arguments): bool {
                 $proposal = $this->proposalFromArguments($arguments);
 
@@ -299,8 +280,8 @@ trait InteractsWithProposals
                     && $this->currentUser()->can('propose', $this->getRound());
             })
             ->requiresConfirmation()
-            ->modalHeading('Neue Version erstellen?')
-            ->modalDescription('Die neue Version startet als Entwurf und braucht eine neue Abstimmung.')
+            ->modalHeading(fn (): string => $this->canManage() ? 'Neue Version erstellen?' : 'Gegenvorschlag machen?')
+            ->modalDescription('Die Kopie startet als Entwurf, den du anpassen kannst. Danach geht sie zur Abstimmung.')
             ->action(function (array $arguments): void {
                 $proposal = $this->proposalFromArguments($arguments);
 
@@ -310,7 +291,37 @@ trait InteractsWithProposals
                 );
 
                 if ($created) {
-                    Notification::make()->title('Neue Version als Entwurf angelegt.')->success()->send();
+                    Notification::make()->title('Entwurf angelegt.')->body('Pass ihn an und gib ihn dann zur Abstimmung frei.')->success()->send();
+                }
+            });
+    }
+
+    /**
+     * Counter-proposals go up for a vote on their own; the lead's proposal
+     * goes up with the switch to the confirmation phase.
+     */
+    public function publishProposalAction(): Action
+    {
+        return Action::make('publishProposal')
+            ->label('Zur Abstimmung freigeben')
+            ->icon(Heroicon::OutlinedMegaphone)
+            ->color('info')
+            ->size('sm')
+            ->visible(fn (array $arguments): bool => $this->canEditProposal($this->proposalFromArguments($arguments))
+                && $this->getRound()->phase === RoundPhase::Finalizing)
+            ->requiresConfirmation()
+            ->modalHeading('Zur Abstimmung freigeben?')
+            ->modalDescription('Danach lässt sich der Vorschlag nicht mehr ändern — für Änderungen gibt es eine neue Version.')
+            ->action(function (array $arguments): void {
+                $proposal = $this->proposalFromArguments($arguments);
+
+                $published = $proposal && $this->attempt(
+                    fn () => app(ProposalWorkflow::class)->publish($proposal, $this->currentUser()),
+                    'Freigabe nicht möglich',
+                );
+
+                if ($published) {
+                    Notification::make()->title('Vorschlag ist zur Abstimmung freigegeben.')->success()->send();
                 }
             });
     }
@@ -319,9 +330,9 @@ trait InteractsWithProposals
     {
         return Action::make('voteUp')
             ->label('👍')
-            ->tooltip(fn (array $arguments): string => $this->receivesShareOf($arguments)
+            ->tooltip(fn (array $arguments): string => $this->decidesOn($arguments)
                 ? 'Daumen hoch — passt für mich'
-                : 'Du bekommst hiervon nichts — deine Stimme zählt nur als Meinung.')
+                : 'Du hast das nicht bestellt — deine Stimme zählt nur als Meinung.')
             ->color(fn (array $arguments): string => $this->myVote($arguments) === VoteValue::Up ? 'success' : 'gray')
             ->outlined(fn (array $arguments): bool => $this->myVote($arguments) !== VoteValue::Up)
             ->size('xs')
@@ -340,9 +351,9 @@ trait InteractsWithProposals
     {
         return Action::make('voteDown')
             ->label('👎')
-            ->tooltip(fn (array $arguments): string => $this->receivesShareOf($arguments)
+            ->tooltip(fn (array $arguments): string => $this->decidesOn($arguments)
                 ? 'Daumen runter — mit Begründung'
-                : 'Du bekommst hiervon nichts — deine Stimme zählt nur als Meinung.')
+                : 'Du hast das nicht bestellt — deine Stimme zählt nur als Meinung.')
             ->color(fn (array $arguments): string => $this->myVote($arguments) === VoteValue::Down ? 'danger' : 'gray')
             ->outlined(fn (array $arguments): bool => $this->myVote($arguments) !== VoteValue::Down)
             ->size('xs')
@@ -372,6 +383,44 @@ trait InteractsWithProposals
             });
     }
 
+    /**
+     * One click instead of a thumbs up per position.
+     */
+    public function approveAllAction(): Action
+    {
+        return Action::make('approveAll')
+            ->label('Allem zustimmen')
+            ->icon(Heroicon::OutlinedHandThumbUp)
+            ->color('success')
+            ->size('sm')
+            ->visible(function (array $arguments): bool {
+                $proposal = $this->proposalFromArguments($arguments);
+
+                return $proposal !== null
+                    && $proposal->isPublished()
+                    && $this->currentUser()->can('vote', $this->getRound())
+                    && $this->itemsAwaitingMyApproval($proposal) !== [];
+            })
+            ->action(function (array $arguments): void {
+                $proposal = $this->proposalFromArguments($arguments);
+
+                $approved = $proposal && $this->attempt(function () use ($proposal): void {
+                    DB::transaction(function () use ($proposal): void {
+                        foreach ($this->itemsAwaitingMyApproval($proposal) as $item) {
+                            app(ProposalWorkflow::class)->vote($item, $this->currentUser(), VoteValue::Up);
+                        }
+                    });
+                }, 'Abstimmen nicht möglich');
+
+                if ($approved) {
+                    Notification::make()->title('Du hast allen deinen Positionen zugestimmt.')->success()->send();
+                }
+            });
+    }
+
+    /**
+     * Choosing the final order and starting the payment phase are one step.
+     */
     public function chooseProposalAction(): Action
     {
         return Action::make('chooseProposal')
@@ -390,25 +439,107 @@ trait InteractsWithProposals
                     ? app(ProposalWorkflow::class)->explainMissingConsensus($consensus)
                     : null;
             })
-            ->requiresConfirmation()
-            ->modalHeading('Als finale Bestellung wählen?')
-            ->modalDescription('Alle Beteiligten haben zugestimmt. Danach werden die Zahlungen angelegt — wechsle anschließend in die Zahlungsphase.')
-            ->action(function (array $arguments): void {
+            ->modalHeading('Bestellung festmachen?')
+            ->modalDescription('Alle Beteiligten haben zugestimmt. Die Runde geht in die Zahlungsphase — alle sehen ihren Betrag.')
+            ->modalSubmitActionLabel('Festmachen')
+            ->modalWidth('3xl')
+            ->fillForm(fn (): array => $this->notificationDefaults(RoundPhase::Payment))
+            ->schema($this->notificationFields())
+            ->action(function (array $data, array $arguments): void {
                 $proposal = $this->proposalFromArguments($arguments);
 
-                $chosen = $proposal && $this->attempt(
-                    fn () => app(ProposalWorkflow::class)->choose($proposal, $this->currentUser()),
-                    'Auswahl nicht möglich',
-                );
+                $chosen = $proposal && $this->attempt(function () use ($proposal): void {
+                    DB::transaction(function () use ($proposal): void {
+                        app(ProposalWorkflow::class)->choose($proposal, $this->currentUser());
+                        app(PhaseTransitioner::class)->transition($this->getRound()->fresh(), RoundPhase::Payment, $this->currentUser());
+                    });
+                }, 'Auswahl nicht möglich');
 
-                if ($chosen) {
-                    Notification::make()
-                        ->title('Finale Bestellung gewählt.')
-                        ->body('Wechsle jetzt in die Zahlungsphase, damit alle ihre Beträge sehen.')
-                        ->success()
-                        ->send();
+                if (! $chosen) {
+                    return;
+                }
+
+                $this->selectedPhase = null;
+                Notification::make()->title('Finale Bestellung gewählt — jetzt wird bezahlt.')->success()->send();
+
+                if ($data['notify'] ?? false) {
+                    $this->sendNotification(NotificationKind::PaymentDue, $data);
                 }
             });
+    }
+
+    /**
+     * Sets what somebody gets of a position by hand; an empty value hands
+     * it back to the automatic distribution.
+     */
+    public function updateAllocation(int $itemId, int $userId, string $value): void
+    {
+        $item = $this->proposalItemFromArguments(['item' => $itemId]);
+
+        if (! $this->canEditProposal($item?->proposal)) {
+            return;
+        }
+
+        $quantity = $this->parseQuantity($value);
+
+        if (trim($value) !== '' && $quantity === null) {
+            Notification::make()->title('Bitte eine Menge wie 3,5 eingeben.')->danger()->send();
+
+            return;
+        }
+
+        $this->attempt(fn () => app(ProposalBuilder::class)->setAllocation($item, $userId, $quantity), 'Menge nicht geändert');
+    }
+
+    public function resetAllocation(int $itemId, int $userId): void
+    {
+        $item = $this->proposalItemFromArguments(['item' => $itemId]);
+
+        if ($this->canEditProposal($item?->proposal)) {
+            $this->attempt(fn () => app(ProposalBuilder::class)->setAllocation($item, $userId, null), 'Menge nicht geändert');
+        }
+    }
+
+    public function updateRounding(int $itemId, string $value): void
+    {
+        $item = $this->proposalItemFromArguments(['item' => $itemId]);
+
+        if (! $this->canEditProposal($item?->proposal)) {
+            return;
+        }
+
+        $step = $value === '' ? null : (float) $value;
+
+        if ($step !== null && ! array_key_exists($value, $this->roundingOptions($item))) {
+            return;
+        }
+
+        $this->attempt(fn () => app(ProposalBuilder::class)->setRounding($item, $step), 'Runden nicht möglich');
+    }
+
+    /**
+     * Coarser steps a position's flexible shares can be rounded to — in
+     * whole portions, so a 350 g pack is never split into half kilograms.
+     *
+     * @return array<string, string> step => label
+     */
+    public function roundingOptions(ProposalItem $item): array
+    {
+        if (! $item->isPortioned()) {
+            return [];
+        }
+
+        $unit = $item->product?->unit;
+        $steps = match ($unit) {
+            ProductUnit::Kilogram, ProductUnit::Liter => [0.25, 0.5, 1.0],
+            ProductUnit::Gram, ProductUnit::Milliliter => [50.0, 100.0, 250.0, 500.0],
+            default => [],
+        };
+
+        return collect($steps)
+            ->filter(fn (float $step): bool => $step > (float) $item->portion_size + 0.0001 && $item->isWholePortions($step))
+            ->mapWithKeys(fn (float $step): array => [(string) $step => CartItem::formatAmount($step, $item->product?->unitLabel())])
+            ->all();
     }
 
     public function consensusFor(?OrderProposal $proposal): ?ProposalConsensus
@@ -426,6 +557,41 @@ trait InteractsWithProposals
     }
 
     /**
+     * The version a proposal copies, if it is still around.
+     */
+    public function baseVersionOf(OrderProposal $proposal): ?OrderProposal
+    {
+        return $proposal->based_on_proposal_id !== null
+            ? $this->getRound()->proposals->firstWhere('id', $proposal->based_on_proposal_id)
+            : null;
+    }
+
+    /**
+     * What changed compared to the version the proposal copies.
+     */
+    public function changesFor(OrderProposal $proposal): ?ProposalChanges
+    {
+        if (! array_key_exists($proposal->id, $this->changesCache)) {
+            $base = $this->baseVersionOf($proposal);
+
+            $this->changesCache[$proposal->id] = $base !== null
+                ? app(ProposalComparison::class)->compare($base, $proposal)
+                : null;
+        }
+
+        return $this->changesCache[$proposal->id];
+    }
+
+    /**
+     * What everybody would have paid with the list prices — to show what the
+     * suppliers' feedback changed.
+     */
+    public function listPriceEstimate(): RoundEstimate
+    {
+        return $this->listPriceEstimate ??= app(PriceEstimator::class)->estimate($this->getRound(), listPrices: true);
+    }
+
+    /**
      * People the lead may exclude while preparing the draft.
      *
      * @return array<int, string> user id => what they did not agree to
@@ -435,18 +601,21 @@ trait InteractsWithProposals
         return $this->exclusionCandidatesCache[$draft->id] ??= app(ParticipantExclusion::class)->candidatesFor($draft);
     }
 
+    public function canEditProposal(?OrderProposal $proposal): bool
+    {
+        return $proposal !== null
+            && $proposal->isDraft()
+            && in_array($this->getRound()->phase, [RoundPhase::Negotiating, RoundPhase::Finalizing], true)
+            && ($proposal->isProposedBy($this->currentUser()) || $this->canManage());
+    }
+
     protected function forgetComputedProposalData(): void
     {
         $this->consensusCache = [];
         $this->totalsCache = [];
         $this->exclusionCandidatesCache = [];
-    }
-
-    protected function canEditProposal(?OrderProposal $proposal): bool
-    {
-        return $proposal !== null
-            && $proposal->isDraft()
-            && ($proposal->isProposedBy($this->currentUser()) || $this->canManage());
+        $this->changesCache = [];
+        $this->listPriceEstimate = null;
     }
 
     protected function canVoteOn(?ProposalItem $item): bool
@@ -457,13 +626,50 @@ trait InteractsWithProposals
     }
 
     /**
-     * Only the votes of people who get something from an item decide on it.
+     * Only the votes of people who ordered a position decide on it.
      *
      * @param  array<string, mixed>  $arguments
      */
-    protected function receivesShareOf(array $arguments): bool
+    protected function decidesOn(array $arguments): bool
     {
         return (bool) $this->proposalItemFromArguments($arguments)?->stakeholderIds()->contains($this->currentUser()->id);
+    }
+
+    /**
+     * @return array<int, ProposalItem>
+     */
+    protected function itemsAwaitingMyApproval(OrderProposal $proposal): array
+    {
+        $userId = $this->currentUser()->id;
+
+        return $proposal->items
+            ->filter(fn (ProposalItem $item): bool => $item->stakeholderIds()->contains($userId)
+                && $item->votes->firstWhere('user_id', $userId)?->value !== VoteValue::Up)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Rounding "Mengen runden" applies: half kilograms or 100 grams — or the
+     * next coarser step if the portions are that big already.
+     */
+    protected function defaultRounding(ProposalItem $item): ?float
+    {
+        $atLeast = match ($item->product?->unit) {
+            ProductUnit::Kilogram, ProductUnit::Liter => 0.5,
+            ProductUnit::Gram, ProductUnit::Milliliter => 100.0,
+            default => null,
+        };
+
+        if ($atLeast === null) {
+            return null;
+        }
+
+        $step = collect(array_keys($this->roundingOptions($item)))
+            ->map(fn (int|string $step): float => (float) $step)
+            ->first(fn (float $step): bool => $step >= $atLeast);
+
+        return $step !== null && abs($step - (float) $item->rounding_step) > 0.0001 ? $step : null;
     }
 
     /**
@@ -499,20 +705,21 @@ trait InteractsWithProposals
         return null;
     }
 
-    protected function tierComparisonView(?ProposalItem $item): ?View
+    /**
+     * German or English notation: "3,5" or "3.5" — and "2.500" or
+     * "2.500,5" with a thousands separator, like Money::parse() reads it.
+     * Null for anything else.
+     */
+    protected function parseQuantity(string $value): ?float
     {
-        if ($item?->product === null) {
-            return null;
+        $value = str_replace([' ', "\u{00A0}"], '', trim($value));
+
+        if (str_contains($value, ',')) {
+            $value = str_replace(['.', ','], ['', '.'], $value);
+        } elseif (preg_match('/^[1-9]\d{0,2}(\.\d{3})+$/', $value) === 1) {
+            $value = str_replace('.', '', $value);
         }
 
-        $cartItems = $this->getRound()->activeCartItems()
-            ->where('product_id', $item->product_id)
-            ->with(['product', 'user'])
-            ->get();
-
-        return view('filament.rounds.partials.tier-comparison', [
-            'item' => $item,
-            'options' => app(ProposalBuilder::class)->compareTiers($item->product->loadMissing('priceTiers'), $cartItems),
-        ]);
+        return preg_match('/^\d+(\.\d{1,3})?$/', $value) === 1 ? (float) $value : null;
     }
 }

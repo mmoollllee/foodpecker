@@ -16,7 +16,7 @@ class PriceObservationRecorder
      */
     public function record(Round $round): int
     {
-        $proposal = $round->chosenProposal()->with('items')->first();
+        $proposal = $round->chosenProposal()->with('items.packages')->first();
 
         if ($proposal === null) {
             return 0;
@@ -27,21 +27,23 @@ class PriceObservationRecorder
         $recorded = 0;
 
         foreach ($proposal->items as $item) {
-            if ($item->package_price_cents === null || (float) $item->package_amount <= 0) {
-                continue;
+            foreach ($item->packages as $package) {
+                if ((float) $package->package_amount <= 0) {
+                    continue;
+                }
+
+                PriceObservation::create([
+                    'product_id' => $item->product_id,
+                    'price_tier_id' => $package->price_tier_id,
+                    'round_id' => $round->id,
+                    'group_id' => $round->group_id,
+                    'observed_price_cents' => $package->price_cents,
+                    'package_amount' => $package->package_amount,
+                    'observed_on' => now()->toDateString(),
+                ]);
+
+                $recorded++;
             }
-
-            PriceObservation::create([
-                'product_id' => $item->product_id,
-                'price_tier_id' => $item->price_tier_id,
-                'round_id' => $round->id,
-                'group_id' => $round->group_id,
-                'observed_price_cents' => $item->package_price_cents,
-                'package_amount' => $item->package_amount,
-                'observed_on' => now()->toDateString(),
-            ]);
-
-            $recorded++;
         }
 
         return $recorded;

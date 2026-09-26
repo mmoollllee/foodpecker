@@ -29,7 +29,7 @@
                             @if ($pickup->isPickedUp())
                                 ✅ abgeholt {{ $pickup->picked_up_at?->diffForHumans() }}
                             @elseif ($pickup->pickupDate)
-                                📅 {{ $pickup->pickupDate->scheduled_at->format('d.m. H:i') }}
+                                📅 {{ $pickup->pickupDate->shortLabel() }}
                             @else
                                 noch kein Termin gewählt
                             @endif

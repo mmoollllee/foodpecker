@@ -9,6 +9,7 @@ use App\Models\OrderProposal;
 use App\Models\Payment;
 use App\Models\PickupDate;
 use App\Models\Round;
+use App\Models\RoundPackagePrice;
 use App\Models\User;
 use App\Services\Proposals\ProposalBuilder;
 use App\Services\Proposals\ProposalWorkflow;
@@ -32,15 +33,28 @@ it('verbietet illegale Phasen-Sprünge', function () {
         ->toThrow(ValidationException::class);
 });
 
-it('erlaubt Draft → Shopping nur mit Abholtermin und Abholort', function () {
-    expect(fn () => $this->transitioner->assertCanTransition($this->round, RoundPhase::Shopping))
-        ->toThrow(ValidationException::class);
+it('starts shopping without pickup dates, but not without a pickup location', function () {
+    expect($this->transitioner->missingRequirements($this->round, RoundPhase::Shopping))
+        ->toBe(['Abholort muss gesetzt sein.']);
 
-    PickupDate::create(['round_id' => $this->round->id, 'scheduled_at' => '2026-12-01 18:00']);
     $this->round->update(['pickup_location' => 'Bei mir']);
 
-    $this->transitioner->assertCanTransition($this->round, RoundPhase::Shopping);
-    expect(true)->toBeTrue();
+    $this->transitioner->transition($this->round, RoundPhase::Shopping, $this->owner);
+
+    expect($this->round->fresh()->phase)->toBe(RoundPhase::Shopping);
+});
+
+it('needs a pickup date before the pickup begins', function () {
+    ['round' => $round, 'lead' => $lead] = roundScenario(1, RoundPhase::Delivery);
+
+    expect($this->transitioner->missingRequirements($round, RoundPhase::Pickup))
+        ->toBe(['Mindestens ein Abholtermin muss angelegt sein — unter „Eckdaten bearbeiten“.']);
+
+    PickupDate::create(['round_id' => $round->id, 'scheduled_at' => '2026-12-01 18:00']);
+
+    $this->transitioner->transition($round, RoundPhase::Pickup, $lead);
+
+    expect($round->fresh()->phase)->toBe(RoundPhase::Pickup);
 });
 
 it('führt Übergänge mit Activity-Eintrag durch', function () {
@@ -129,11 +143,11 @@ it('needs a reason to cancel a round', function () {
     expect(fn () => $transitioner->transition($round, RoundPhase::Cancelled, $lead))
         ->toThrow(ValidationException::class, 'Bitte gib einen Grund für den Abbruch an.');
 
-    $transitioner->transition($round, RoundPhase::Cancelled, $lead, 'Hersteller liefert nicht');
+    $transitioner->transition($round, RoundPhase::Cancelled, $lead, 'Lieferant liefert nicht');
 
     expect($round->fresh()->phase)->toBe(RoundPhase::Cancelled)
         ->and($round->activities()->where('action', 'phase_changed')->latest('id')->first()->describeAction())
-        ->toBe('Phase Einkauf → Abgebrochen (Grund: Hersteller liefert nicht)');
+        ->toBe('Phase Einkauf → Abgebrochen (Grund: Lieferant liefert nicht)');
 });
 
 it('knows the next and previous step of a round', function () {
@@ -154,9 +168,9 @@ it('records the paid prices as reference values when the order is placed', funct
     $rice = productWithTier($group, packageAmount: 25, priceCents: 5500);
     CartItem::factory()->for($round)->exact(25)->create(['user_id' => $anna->id, 'product_id' => $rice->id]);
 
+    RoundPackagePrice::create(['round_id' => $round->id, 'price_tier_id' => $rice->priceTiers->first()->id, 'price_cents' => 5100]);
     $proposal = app(ProposalBuilder::class)->createFromCarts($round, $lead, ['title' => 'P']);
     $item = $proposal->items()->firstOrFail();
-    app(ProposalBuilder::class)->updateItem($item, $item->toPackageSpec()->withPrice(5100));
 
     $workflow = app(ProposalWorkflow::class);
     $workflow->publish($proposal, $lead);
@@ -191,4 +205,38 @@ it('undoes the final choice when the lead goes back to negotiating', function ()
     expect($round->fresh()->chosen_proposal_id)->toBeNull()
         ->and($proposal->fresh()->status)->toBe(ProposalStatus::Published)
         ->and(Payment::where('round_id', $round->id)->count())->toBe(0);
+});
+
+it('drafts the order proposal as soon as shopping ends', function () {
+    ['group' => $group, 'round' => $round, 'lead' => $lead, 'members' => [$anna]] = roundScenario(1, RoundPhase::Shopping);
+    $rice = productWithTier($group, packageAmount: 10, priceCents: 2800);
+    CartItem::factory()->for($round)->exact(10)->create(['user_id' => $anna->id, 'product_id' => $rice->id]);
+
+    app(PhaseTransitioner::class)->transition($round, RoundPhase::Negotiating, $lead);
+
+    $draft = $round->proposals()->sole();
+
+    expect($draft->title)->toBe('Bestellvorschlag')
+        ->and($draft->isDraft())->toBeTrue()
+        ->and($draft->proposed_by_user_id)->toBe($lead->id)
+        ->and($draft->items()->sole()->product_id)->toBe($rice->id);
+});
+
+it('continues with a new version of the voted proposal when the lead goes back to the adjustment', function () {
+    ['group' => $group, 'round' => $round, 'lead' => $lead, 'members' => [$anna, $ben]] = roundScenario(2, RoundPhase::Negotiating);
+    $rice = productWithTier($group, packageAmount: 10, priceCents: 2800);
+    CartItem::factory()->for($round)->exact(5)->create(['user_id' => $anna->id, 'product_id' => $rice->id]);
+    CartItem::factory()->for($round)->exact(5)->create(['user_id' => $ben->id, 'product_id' => $rice->id]);
+    $builder = app(ProposalBuilder::class);
+    $voted = $builder->createFromCarts($round, $lead, ['title' => 'Bestellvorschlag']);
+    $builder->setAllocation($voted->items()->sole(), $anna->id, 4);
+    app(ProposalWorkflow::class)->publish($voted->fresh(), $lead);
+    $round->update(['phase' => RoundPhase::Finalizing]);
+
+    app(PhaseTransitioner::class)->transition($round, RoundPhase::Negotiating, $lead);
+
+    $draft = $round->proposals()->where('status', ProposalStatus::Draft->value)->sole();
+
+    expect($draft->based_on_proposal_id)->toBe($voted->id)
+        ->and((float) $draft->items()->sole()->allocations()->where('user_id', $anna->id)->value('quantity'))->toBe(4.0);
 });

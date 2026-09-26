@@ -5,7 +5,6 @@ namespace App\Models;
 use App\Concerns\HasActivities;
 use App\Concerns\HasAttachments;
 use App\Concerns\HasNotes;
-use App\Enums\PackagingStrategy;
 use App\Enums\ProductCategory;
 use App\Enums\ProductUnit;
 use App\Enums\Visibility;
@@ -28,18 +27,16 @@ class Product extends Model
 
     protected $fillable = [
         'group_id',
-        'manufacturer_id',
+        'supplier_id',
         'created_by_user_id',
         'name',
         'slug',
         'visibility',
         'unit',
         'category',
-        'packaging_strategy',
+        'portion_size',
         'description',
         'image_path',
-        'estimated_price_cents',
-        'estimated_price_per_unit',
     ];
 
     protected function casts(): array
@@ -48,9 +45,7 @@ class Product extends Model
             'visibility' => Visibility::class,
             'unit' => ProductUnit::class,
             'category' => ProductCategory::class,
-            'packaging_strategy' => PackagingStrategy::class,
-            'estimated_price_cents' => 'integer',
-            'estimated_price_per_unit' => 'decimal:4',
+            'portion_size' => 'decimal:3',
         ];
     }
 
@@ -112,9 +107,9 @@ class Product extends Model
         return $this->belongsTo(Group::class);
     }
 
-    public function manufacturer(): BelongsTo
+    public function supplier(): BelongsTo
     {
-        return $this->belongsTo(Manufacturer::class);
+        return $this->belongsTo(Supplier::class);
     }
 
     public function priceTiers(): HasMany
@@ -186,24 +181,56 @@ class Product extends Model
         });
     }
 
-    public function formattedEstimatedPrice(): ?string
+    /**
+     * Whether packages of this product are shared out in portions — or
+     * every package goes whole to one person.
+     */
+    public function isPortioned(): bool
     {
-        if ($this->estimated_price_cents === null) {
-            return null;
-        }
+        return $this->portion_size !== null && (float) $this->portion_size > 0;
+    }
 
-        return number_format($this->estimated_price_cents / 100, 2, ',', '.').' €';
+    public function portionSize(): ?float
+    {
+        return $this->isPortioned() ? (float) $this->portion_size : null;
+    }
+
+    /**
+     * Whether an amount comes in whole portions — nobody gets half a jar or
+     * a torn pack. Products that go out in whole packages take any amount.
+     */
+    public function isWholePortions(float $quantity): bool
+    {
+        $portion = $this->portionSize();
+
+        return $portion === null || abs($quantity / $portion - round($quantity / $portion)) < 0.0001;
+    }
+
+    /**
+     * The nearest amount in whole portions, at least one portion.
+     */
+    public function toWholePortions(float $quantity): float
+    {
+        $portion = $this->portionSize();
+
+        return $portion === null ? $quantity : round(max(1, round($quantity / $portion)) * $portion, 3);
+    }
+
+    /**
+     * How the product is shared, e.g. "in Portionen zu 0,5 kg".
+     */
+    public function distributionLabel(): string
+    {
+        return $this->isPortioned()
+            ? 'in Portionen zu '.CartItem::formatAmount((float) $this->portion_size, $this->unitLabel())
+            : 'nur ganze Packungen';
     }
 
     public function packagingSummary(): string
     {
         $tiers = $this->priceTiers->map(fn (PriceTier $t) => $t->label);
 
-        if ($tiers->isEmpty()) {
-            return $this->packaging_strategy?->getLabel() ?? '—';
-        }
-
-        return $tiers->implode(' · ');
+        return $tiers->isEmpty() ? '—' : $tiers->implode(' · ');
     }
 
     /**

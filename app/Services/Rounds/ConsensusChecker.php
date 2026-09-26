@@ -10,8 +10,9 @@ use App\Models\ProposalVote;
 /**
  * Evaluates the consensus rule of a proposal:
  *
- *   - Only stakeholders count: the people who receive a share of an item.
- *     Others may vote, but can't block an item they don't order from.
+ *   - Only stakeholders count: the people who ordered the product — also
+ *     when the proposal gives them nothing. Others may vote, but can't
+ *     block an item they didn't order.
  *   - An item is approved when every stakeholder voted thumbs up.
  *   - A proposal is unanimous when every item is approved and no excluded
  *     participant is still part of it.
@@ -31,10 +32,9 @@ class ConsensusChecker
         $excludedStakeholderIds = [];
 
         foreach ($proposal->items as $item) {
-            $consensus = $this->evaluateItem($item);
-            $items[$item->id] = $consensus;
+            $items[$item->id] = $this->evaluateItem($item, $excludedIds);
 
-            foreach (array_intersect($consensus->stakeholderIds, $excludedIds) as $userId) {
+            foreach (array_intersect($item->receiverIds()->all(), $excludedIds) as $userId) {
                 $excludedStakeholderIds[] = $userId;
             }
         }
@@ -42,11 +42,14 @@ class ConsensusChecker
         return new ProposalConsensus($items, array_values(array_unique($excludedStakeholderIds)));
     }
 
-    public function evaluateItem(ProposalItem $item): ItemConsensus
+    /**
+     * @param  array<int, int>  $excludedIds  Excluded participants — they don't decide anymore.
+     */
+    public function evaluateItem(ProposalItem $item, array $excludedIds = []): ItemConsensus
     {
         $item->loadMissing(['allocations', 'votes']);
 
-        $stakeholderIds = $item->stakeholderIds()->all();
+        $stakeholderIds = array_values(array_diff($item->stakeholderIds()->all(), $excludedIds));
         $approvedBy = [];
         $rejectedBy = [];
 

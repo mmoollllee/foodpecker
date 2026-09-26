@@ -6,6 +6,7 @@ use App\Enums\QuantityMode;
 use App\Enums\RoundPhase;
 use App\Models\CartItem;
 use App\Models\PriceTier;
+use App\Models\Product;
 use App\Models\Round;
 use App\Models\RoundParticipant;
 use App\Models\User;
@@ -35,16 +36,14 @@ class CartService
         );
 
         $productId = (int) $data['product_id'];
-        $this->ensure(
-            $round->availableProductsForCart()->whereKey($productId)->exists(),
-            'Dieses Produkt ist in dieser Runde nicht bestellbar.',
-        );
+        $product = $round->availableProductsForCart()->whereKey($productId)->first();
+        $this->ensure($product !== null, 'Dieses Produkt ist in dieser Runde nicht bestellbar.');
 
         $mode = $data['quantity_mode'] instanceof QuantityMode
             ? $data['quantity_mode']
             : QuantityMode::from($data['quantity_mode']);
 
-        $quantities = $this->quantities($mode, $data);
+        $quantities = $this->quantities($product, $mode, $data);
         $preferredTierId = $this->preferredTierId($productId, $data['preferred_price_tier_id'] ?? null);
 
         return DB::transaction(function () use ($round, $user, $productId, $mode, $quantities, $preferredTierId, $data): CartItem {
@@ -82,11 +81,12 @@ class CartService
      * @param  array<string, mixed>  $data
      * @return array{exact_quantity: float|null, min_quantity: float|null, max_quantity: float|null}
      */
-    private function quantities(QuantityMode $mode, array $data): array
+    private function quantities(Product $product, QuantityMode $mode, array $data): array
     {
         if ($mode === QuantityMode::Exact) {
             $exact = (float) ($data['exact_quantity'] ?? 0);
             $this->ensure($exact > 0, 'Die Menge muss größer als 0 sein.');
+            $this->ensureWholePortions($product, $exact);
 
             return ['exact_quantity' => $exact, 'min_quantity' => null, 'max_quantity' => null];
         }
@@ -96,8 +96,20 @@ class CartService
 
         $this->ensure($min >= 0 && $max > 0, 'Bitte eine Mindest- und eine Maximalmenge angeben.');
         $this->ensure($min <= $max, 'Die Mindestmenge darf nicht größer als die Maximalmenge sein.');
+        $this->ensureWholePortions($product, $min, $max);
 
         return ['exact_quantity' => null, 'min_quantity' => $min, 'max_quantity' => $max];
+    }
+
+    private function ensureWholePortions(Product $product, float ...$quantities): void
+    {
+        foreach ($quantities as $quantity) {
+            $this->ensure($product->isWholePortions($quantity), sprintf(
+                '%s wird in Portionen zu %s verteilt — bitte ein Vielfaches davon angeben.',
+                $product->name,
+                CartItem::formatAmount((float) $product->portionSize(), $product->unitLabel()),
+            ));
+        }
     }
 
     private function preferredTierId(int $productId, mixed $tierId): ?int

@@ -51,6 +51,18 @@ it('keeps participants out of invitations and role changes', function () {
         ->assertActionVisible('leaveGroup');
 });
 
+it('shows open invitations and their links only to people who may invite', function () {
+    GroupInvitation::create(['group_id' => $this->group->id, 'invited_by_user_id' => $this->owner->id, 'email' => 'mod@example.org', 'role' => GroupRole::Moderator->value]);
+
+    actingInGroup($this->participant, $this->group);
+
+    expect(Livewire::test(Members::class)->viewData('invitations'))->toBeEmpty();
+
+    actingInGroup($this->moderator, $this->group);
+
+    expect(Livewire::test(Members::class)->viewData('invitations'))->toHaveCount(1);
+});
+
 it('switches the role with one click on the badge', function (GroupRole $shown, GroupRole $switchedTo, string $notification) {
     $member = User::factory()->create(['first_name' => 'Nora', 'last_name' => 'Neu']);
     $this->group->members()->attach($member->id, ['role' => $shown->value]);

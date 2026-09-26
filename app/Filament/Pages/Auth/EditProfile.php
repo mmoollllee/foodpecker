@@ -4,12 +4,16 @@ namespace App\Filament\Pages\Auth;
 
 use App\Filament\Forms\UserFields;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Text;
+use Filament\Support\Icons\Heroicon;
 use Mmoollllee\FilamentUserProfile\Filament\Pages\EditProfile as ProfilePage;
 use SensitiveParameter;
 
 /**
  * The personal profile: photo, names and nickname, mobile number, location
- * and household size — plus e-mail and password on the second tab.
+ * and household size — plus e-mail and password on the second tab and the
+ * bank details for rounds one leads on the third.
  */
 class EditProfile extends ProfilePage
 {
@@ -35,6 +39,41 @@ class EditProfile extends ProfilePage
                 UserFields::city(),
                 UserFields::householdSize(),
             ]),
+        ];
+    }
+
+    /**
+     * @return array<int, Tab>
+     */
+    protected function getExtraTabs(): array
+    {
+        return [
+            Tab::make('Bankverbindung')
+                ->id('bank')
+                ->icon(Heroicon::OutlinedBanknotes)
+                ->schema([
+                    Text::make('Leitest du eine Runde, überweisen dir alle ihren Anteil. Mit deiner IBAN sehen sie in der Zahlungsphase Empfänger, Betrag und Verwendungszweck — und einen GiroCode für die Banking-App.'),
+                    Grid::make(2)->schema([
+                        UserFields::iban(),
+                        UserFields::bankAccountHolder(),
+                        UserFields::bic(),
+                    ]),
+                ]),
+        ];
+    }
+
+    /**
+     * The bank details are hidden from serialization, so they are added to
+     * the form by hand.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        return [
+            ...parent::mutateFormDataBeforeFill($data),
+            ...$this->getUser()->only(['iban', 'bic', 'bank_account_holder']),
         ];
     }
 

@@ -3,9 +3,9 @@
 namespace App\Filament\Concerns;
 
 use App\Models\Attachment;
-use App\Models\Manufacturer;
 use App\Models\Note;
 use App\Models\Product;
+use App\Models\Supplier;
 use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -18,8 +18,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Notes and documents on a round, manufacturer or product. On shared
- * manufacturers and products every group sees them — people from other
+ * Notes and documents on a round, supplier or product. On shared
+ * suppliers and products every group sees them — people from other
  * groups are shown without their name.
  */
 trait InteractsWithNotesAndDocuments
@@ -44,7 +44,7 @@ trait InteractsWithNotesAndDocuments
     ];
 
     /**
-     * The round, manufacturer or product the notes belong to.
+     * The round, supplier or product the notes belong to.
      */
     abstract protected function annotatedRecord(): Model;
 
@@ -190,7 +190,7 @@ trait InteractsWithNotesAndDocuments
 
     protected function isShared(Model $record): bool
     {
-        return ($record instanceof Manufacturer || $record instanceof Product) && $record->isPublic();
+        return ($record instanceof Supplier || $record instanceof Product) && $record->isPublic();
     }
 
     protected function annotatingUser(): User

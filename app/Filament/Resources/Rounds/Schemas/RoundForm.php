@@ -4,10 +4,9 @@ namespace App\Filament\Resources\Rounds\Schemas;
 
 use App\Models\Group;
 use App\Models\Product;
+use CodeWithKyrian\FilamentDateRange\Forms\Components\DateRangePicker;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
-use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -108,7 +107,7 @@ class RoundForm
             ->relationship('availableProducts', 'name')
             ->options(fn (): array => static::selectableProducts()->mapWithKeys(fn (Product $product): array => [$product->id => $product->name])->all())
             ->descriptions(fn (): array => static::selectableProducts()->mapWithKeys(fn (Product $product): array => [
-                $product->id => ($product->manufacturer?->name ?? '—').' · '.$product->packagingSummary(),
+                $product->id => ($product->supplier?->name ?? '—').' · '.$product->packagingSummary(),
             ])->all())
             ->columns(2)
             ->bulkToggleable()
@@ -122,38 +121,38 @@ class RoundForm
     public static function scheduleFields(): array
     {
         return [
-            DatePicker::make('shopping_deadline')
+            DateRangePicker::make('shopping_deadline')
                 ->label('Ende Einkaufsphase')
-                ->native(false)
+                ->singleDate()
                 ->displayFormat('d.m.Y')
-                ->default(fn () => now()->addDays(14))
+                ->default(fn () => now()->addDays(14)->startOfDay())
                 ->helperText('Bis wann sollen alle ihre Warenkörbe befüllt haben? Typisch: ca. 2 Wochen.'),
-            DatePicker::make('negotiation_deadline')
-                ->label('Ende Verhandlungsphase')
-                ->native(false)
+            DateRangePicker::make('negotiation_deadline')
+                ->label('Ende Anpassungsphase')
+                ->singleDate()
                 ->displayFormat('d.m.Y')
-                ->default(fn () => now()->addDays(21))
+                ->default(fn () => now()->addDays(21)->startOfDay())
                 ->afterOrEqual('shopping_deadline')
-                ->helperText('Bis dahin holt der Lead aktuelle Preise vom Hersteller. Typisch: ca. 5 Werktage.'),
-            DatePicker::make('finalization_deadline')
+                ->helperText('Bis dahin holt der Lead Preise und Versandkosten bei den Lieferanten ein. Typisch: ca. 5 Werktage.'),
+            DateRangePicker::make('finalization_deadline')
                 ->label('Ende Bestätigungsphase')
-                ->native(false)
+                ->singleDate()
                 ->displayFormat('d.m.Y')
-                ->default(fn () => now()->addDays(28))
+                ->default(fn () => now()->addDays(28)->startOfDay())
                 ->afterOrEqual('negotiation_deadline')
                 ->helperText('Bis dahin müssen alle Beteiligten dem finalen Vorschlag zugestimmt haben.'),
-            DatePicker::make('payment_deadline')
+            DateRangePicker::make('payment_deadline')
                 ->label('Ende Zahlungsphase')
-                ->native(false)
+                ->singleDate()
                 ->displayFormat('d.m.Y')
-                ->default(fn () => now()->addDays(35))
+                ->default(fn () => now()->addDays(35)->startOfDay())
                 ->afterOrEqual('finalization_deadline')
                 ->helperText('Bis dahin überweisen alle ihren Anteil an den Lead — außerhalb der Plattform.'),
-            DatePicker::make('expected_delivery')
+            DateRangePicker::make('expected_delivery')
                 ->label('Voraussichtliche Lieferung')
-                ->native(false)
+                ->singleDate()
                 ->displayFormat('d.m.Y')
-                ->default(fn () => now()->addDays(56))
+                ->default(fn () => now()->addDays(56)->startOfDay())
                 ->helperText('Wann sollte die Ware beim Lead eintreffen? Grob geschätzt reicht.'),
         ];
     }
@@ -181,13 +180,20 @@ class RoundForm
             Repeater::make('pickupDates')
                 ->relationship()
                 ->label('Abholtermine')
+                ->mutateRelationshipDataBeforeFillUsing(fn (array $data): array => [
+                    ...$data,
+                    'window' => ['start' => $data['scheduled_at'] ?? null, 'end' => $data['ends_at'] ?? null],
+                ])
+                ->mutateRelationshipDataBeforeCreateUsing(fn (array $data): array => static::pickupWindowToColumns($data))
+                ->mutateRelationshipDataBeforeSaveUsing(fn (array $data): array => static::pickupWindowToColumns($data))
                 ->schema([
-                    DateTimePicker::make('scheduled_at')
-                        ->label('Termin')
+                    DateRangePicker::make('window')
+                        ->label('Zeitfenster')
                         ->required()
-                        ->native(false)
-                        ->seconds(false)
-                        ->displayFormat('d.m.Y H:i'),
+                        ->withTime()
+                        ->displayFormat('d.m.Y H:i')
+                        ->startPlaceholder('Von')
+                        ->endPlaceholder('Bis'),
                     TextInput::make('location')
                         ->label('Spezifischer Ort (optional)')
                         ->placeholder('Falls abweichend vom Hauptort')
@@ -199,9 +205,27 @@ class RoundForm
                 ])
                 ->columns(3)
                 ->columnSpanFull()
-                ->defaultItems(1)
-                ->addActionLabel('Weiteren Abholtermin hinzufügen')
-                ->helperText('1–3 Termine, zu denen Teilnehmer abholen können. Mindestens einer wird für den Start der Einkaufsphase benötigt.'),
+                ->defaultItems(0)
+                ->addActionLabel('Abholtermin hinzufügen')
+                ->helperText('1–3 Termine, zu denen Teilnehmer abholen können. Leg sie fest, sobald der Liefertermin absehbar ist — spätestens bevor die Abholung beginnt.'),
+        ];
+    }
+
+    /**
+     * The picked time window goes into the start and end columns.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function pickupWindowToColumns(array $data): array
+    {
+        $window = $data['window'] ?? [];
+        unset($data['window']);
+
+        return [
+            ...$data,
+            'scheduled_at' => $window['start'] ?? null,
+            'ends_at' => $window['end'] ?? null,
         ];
     }
 
@@ -258,7 +282,7 @@ class RoundForm
     private static function selectableProducts(): Collection
     {
         return once(fn () => Product::visibleTo(static::currentGroup())
-            ->with(['manufacturer', 'priceTiers'])
+            ->with(['supplier', 'priceTiers'])
             ->orderBy('name')
             ->get());
     }

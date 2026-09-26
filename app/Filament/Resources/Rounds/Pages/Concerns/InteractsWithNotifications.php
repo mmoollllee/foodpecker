@@ -113,27 +113,33 @@ trait InteractsWithNotifications
                     'Versand nicht möglich',
                 );
 
-                if (! $sent) {
-                    return;
+                if ($sent) {
+                    $this->reportSentNotification($result);
                 }
-
-                if ($result['failed'] !== []) {
-                    Notification::make()
-                        ->title("Benachrichtigung an {$result['sent']} Personen verschickt.")
-                        ->body('Nicht zugestellt an: '.implode(', ', $result['failed']).'. Sag ihnen am besten direkt Bescheid.')
-                        ->warning()
-                        ->persistent()
-                        ->send();
-
-                    return;
-                }
-
-                Notification::make()
-                    ->title("Benachrichtigung an {$result['sent']} Personen verschickt.")
-                    ->body(config('mail.default') === 'log' ? 'Hinweis: Der Mailer steht auf „log“ — die Mails landen im Log statt im Postfach.' : null)
-                    ->success()
-                    ->send();
             });
+    }
+
+    /**
+     * @param  array{sent: int, failed: array<int, string>}  $result
+     */
+    protected function reportSentNotification(array $result): void
+    {
+        if ($result['failed'] !== []) {
+            Notification::make()
+                ->title("Benachrichtigung an {$result['sent']} Personen verschickt.")
+                ->body('Nicht zugestellt an: '.implode(', ', $result['failed']).'. Sag ihnen am besten direkt Bescheid.')
+                ->warning()
+                ->persistent()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title("Benachrichtigung an {$result['sent']} Personen verschickt.")
+            ->body(config('mail.default') === 'log' ? 'Hinweis: Der Mailer steht auf „log“ — die Mails landen im Log statt im Postfach.' : null)
+            ->success()
+            ->send();
     }
 
     public function deleteDraftAction(): Action

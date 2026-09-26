@@ -96,6 +96,41 @@ final class Money
     }
 
     /**
+     * Splits an amount in proportion to the weights, exact to the cent:
+     * every share is rounded down, the cents left over go to the largest
+     * remainders (the first on a tie). No share is ever negative. Without
+     * weights the amount is split evenly.
+     *
+     * @param  array<int|string, int|float>  $weights
+     * @return array<int|string, int>
+     */
+    public static function splitProportionally(int $cents, array $weights): array
+    {
+        $total = array_sum($weights);
+
+        if ($total <= 0) {
+            return array_combine(array_keys($weights), self::splitEvenly($cents, count($weights)));
+        }
+
+        $shares = [];
+        $remainders = [];
+
+        foreach ($weights as $key => $weight) {
+            $exact = $cents * $weight / $total;
+            $shares[$key] = (int) floor($exact + 1e-9);
+            $remainders[$key] = $exact - $shares[$key];
+        }
+
+        arsort($remainders);
+
+        foreach (array_slice(array_keys($remainders), 0, max(0, $cents - array_sum($shares))) as $key) {
+            $shares[$key]++;
+        }
+
+        return $shares;
+    }
+
+    /**
      * Aufrunden auf das nächste Vielfache von `stepCents`.
      */
     public static function roundUpTo(int $cents, int $stepCents): int

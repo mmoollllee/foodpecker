@@ -47,7 +47,7 @@
                             <tr>
                                 <td class="py-2 pr-4 font-medium">{{ $line['product'] }}</td>
                                 <td class="px-3 py-2 text-gray-500">{{ $line['package'] }}</td>
-                                <td class="px-3 py-2 text-right tabular-nums">{{ CartItem::formatQuantity($line['quantity']) }} {{ $line['unit'] }}</td>
+                                <td class="px-3 py-2 text-right tabular-nums">{{ CartItem::formatAmount($line['quantity'], $line['unit']) }}</td>
                                 <td class="px-3 py-2 text-right tabular-nums">{{ Money::format($line['share_cents']) }}</td>
                             </tr>
                         @endforeach

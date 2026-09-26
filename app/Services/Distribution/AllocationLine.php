@@ -2,23 +2,29 @@
 
 namespace App\Services\Distribution;
 
-use App\Models\CartItem;
-
 /**
- * Ein einzelner Verteilungs-Eintrag pro Cart-Item / Teilnehmer.
+ * What one person gets of a product and pays for it.
  */
 class AllocationLine
 {
+    /**
+     * @param  array<int, int>  $packageCounts  Whole packages by price tier id, for products that are not portioned.
+     */
     public function __construct(
         public readonly int $userId,
-        public readonly ?CartItem $cartItem,
         public readonly float $requestedMin,
         public readonly float $requestedMax,
         public float $allocatedQuantity = 0.0,
         public int $shareCents = 0,
         public bool $unfulfilled = false,
+        public readonly bool $manual = false,
+        public array $packageCounts = [],
     ) {}
 
+    /**
+     * How far the allocation is off the wish: negative below the minimum,
+     * positive above the maximum.
+     */
     public function deviation(): float
     {
         if ($this->allocatedQuantity < $this->requestedMin) {

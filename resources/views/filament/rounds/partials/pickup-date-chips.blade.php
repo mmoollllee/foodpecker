@@ -9,7 +9,7 @@
     <div class="mt-4 flex flex-wrap gap-2">
         @foreach ($round->pickupDates as $pickupDate)
             <span class="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                📅 {{ $pickupDate->scheduled_at->format('d.m.Y H:i') }}{{ $pickupDate->location ? ' · '.$pickupDate->location : '' }}{{ $withCounts ? ' · '.($counts[$pickupDate->id] ?? 0).' angemeldet' : '' }}
+                📅 {{ $pickupDate->label() }}{{ $pickupDate->location ? ' · '.$pickupDate->location : '' }}{{ $withCounts ? ' · '.($counts[$pickupDate->id] ?? 0).' angemeldet' : '' }}
             </span>
         @endforeach
     </div>

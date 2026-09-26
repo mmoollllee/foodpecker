@@ -4,9 +4,9 @@ namespace App\Filament\Widgets;
 
 use App\Enums\RoundPhase;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\Product;
 use App\Models\Round;
+use App\Models\Supplier;
 use Filament\Facades\Filament;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -32,7 +32,7 @@ class GroupStatsOverview extends BaseWidget
 
         $members = $tenant->members()->count();
 
-        $visibleManufacturers = Manufacturer::visibleTo($tenant)->count();
+        $visibleSuppliers = Supplier::visibleTo($tenant)->count();
         $visibleProducts = Product::visibleTo($tenant)->count();
 
         return [
@@ -44,7 +44,7 @@ class GroupStatsOverview extends BaseWidget
                 ->description('in dieser Gruppe')
                 ->descriptionIcon('heroicon-m-users')
                 ->color('info'),
-            Stat::make('Hersteller & Produkte', $visibleManufacturers.' / '.$visibleProducts)
+            Stat::make('Lieferanten & Produkte', $visibleSuppliers.' / '.$visibleProducts)
                 ->description('verfügbar (privat + öffentlich)')
                 ->descriptionIcon('heroicon-m-building-storefront')
                 ->color('gray'),

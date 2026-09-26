@@ -5,13 +5,16 @@ namespace App\Filament\Resources\Rounds\Pages;
 use App\Enums\RoundPhase;
 use App\Filament\Concerns\InteractsWithNotesAndDocuments;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithCarts;
+use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithCatalogPrices;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithFulfillment;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithLeadHandover;
-use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithManufacturerMails;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithNotifications;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithParticipants;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithPhases;
 use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithProposals;
+use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithSupplierFeedback;
+use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithSupplierMails;
+use App\Filament\Resources\Rounds\Pages\Concerns\InteractsWithSupplierOrders;
 use App\Filament\Resources\Rounds\RoundResource;
 use App\Models\Round;
 use App\Models\User;
@@ -34,14 +37,17 @@ use Livewire\Attributes\Url;
 class ViewRound extends ViewRecord
 {
     use InteractsWithCarts;
+    use InteractsWithCatalogPrices;
     use InteractsWithFulfillment;
     use InteractsWithLeadHandover;
-    use InteractsWithManufacturerMails;
     use InteractsWithNotesAndDocuments;
     use InteractsWithNotifications;
     use InteractsWithParticipants;
     use InteractsWithPhases;
     use InteractsWithProposals;
+    use InteractsWithSupplierFeedback;
+    use InteractsWithSupplierMails;
+    use InteractsWithSupplierOrders;
 
     protected static string $resource = RoundResource::class;
 
@@ -64,16 +70,18 @@ class ViewRound extends ViewRecord
         'participants.user',
         'participants.removedBy',
         'cartItems.user',
-        'cartItems.product.manufacturer',
+        'cartItems.product.supplier',
         'cartItems.product.priceTiers',
-        'proposals.items.product',
-        'proposals.items.priceTier',
+        'proposals.items.product.priceTiers',
+        'proposals.items.product.supplier',
+        'proposals.items.packages',
         'proposals.items.allocations.user',
         'proposals.items.votes.user',
         'proposals.proposedBy',
         'payments.user',
         'pickups.user',
         'pickups.pickupDate',
+        'roundSuppliers',
         'notificationDrafts.preparedBy',
         'notificationDrafts.sentBy',
         'notes.user',
@@ -103,6 +111,17 @@ class ViewRound extends ViewRecord
     protected function resolveRecord(int|string $key): Model
     {
         return parent::resolveRecord($key)->load(static::RELATIONS);
+    }
+
+    /**
+     * Livewire restores the round from its key alone on every request —
+     * without the relations the page reads row by row.
+     */
+    public function hydrate(): void
+    {
+        parent::hydrate();
+
+        $this->getRound()->loadMissing(static::RELATIONS);
     }
 
     /**
@@ -193,6 +212,12 @@ class ViewRound extends ViewRecord
     {
         $this->record = $this->resolveRecord($this->getRound()->getKey());
         $this->forgetComputedProposalData();
+        $this->feedbackSuppliersCache = null;
+        $this->orderSuppliersCache = null;
+        $this->pendingCatalogPricesCache = null;
+        $this->composableSuppliersCache = [];
+        $this->fillMissingSupplierFeedback();
+        $this->cartEstimate = null;
     }
 
     /**

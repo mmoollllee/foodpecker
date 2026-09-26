@@ -1,0 +1,218 @@
+<?php
+
+namespace App\Filament\Resources\Suppliers;
+
+use App\Enums\Visibility;
+use App\Filament\Resources\Suppliers\Pages\ManageSuppliers;
+use App\Filament\Resources\Suppliers\Pages\ViewSupplier;
+use App\Filament\Resources\Suppliers\RelationManagers\ProductsRelationManager;
+use App\Models\Supplier;
+use BackedEnum;
+use Closure;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
+use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+
+class SupplierResource extends Resource
+{
+    protected static ?string $model = Supplier::class;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingStorefront;
+
+    protected static ?string $navigationLabel = 'Lieferanten';
+
+    protected static ?string $modelLabel = 'Lieferant';
+
+    protected static ?string $pluralModelLabel = 'Lieferanten';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Stammdaten';
+
+    protected static ?int $navigationSort = 10;
+
+    protected static bool $isScopedToTenant = false;
+
+    public static function form(Schema $schema): Schema
+    {
+        return $schema->components(static::formComponents());
+    }
+
+    /**
+     * The supplier's fields — also used to add a supplier right from the
+     * product form.
+     *
+     * @return array<int, Section>
+     */
+    public static function formComponents(): array
+    {
+        return [
+            Section::make('Stammdaten')
+                ->schema([
+                    TextInput::make('name')
+                        ->label('Name')
+                        ->required()
+                        ->maxLength(255)
+                        ->columnSpan(2),
+                    Select::make('visibility')
+                        ->label('Sichtbarkeit')
+                        ->options(Visibility::class)
+                        ->default(Visibility::Private->value)
+                        ->required()
+                        // Also used to create a supplier from the product form, where the record is the product.
+                        ->rule(fn (?Model $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                            $newVisibility = $value instanceof Visibility ? $value : Visibility::tryFrom((string) $value);
+
+                            if ($record instanceof Supplier && $record->isPublic() && $newVisibility === Visibility::Private && $record->isUsedByOtherGroups()) {
+                                $fail('Andere Gruppen bestellen bereits bei diesem Lieferanten — er muss öffentlich bleiben.');
+                            }
+                        })
+                        ->helperText('Öffentliche Lieferanten können alle Gruppen nutzen, ändern kann sie nur eure Gruppe. Wird ein Lieferant privat, werden auch seine Produkte privat.'),
+                    TextInput::make('website')
+                        ->label('Website')
+                        ->url()
+                        ->prefix('https://')
+                        ->maxLength(255),
+                    TextInput::make('contact_email')
+                        ->label('E-Mail')
+                        ->email()
+                        ->maxLength(255),
+                    TextInput::make('contact_phone')
+                        ->label('Telefon')
+                        ->tel()
+                        ->maxLength(255),
+                ])->columns(3),
+            Section::make('Adresse & Versand')
+                ->schema([
+                    Textarea::make('address')
+                        ->label('Adresse')
+                        ->rows(3),
+                    Textarea::make('shipping_notes')
+                        ->label('Versandhinweise')
+                        ->rows(3)
+                        ->helperText('z. B. Mindestbestellmengen, Lieferzeiten, übliche Versandkosten.'),
+                ])->columns(2)->collapsible(),
+            Section::make('Beschreibung')
+                ->schema([
+                    Textarea::make('description')
+                        ->label('Beschreibung')
+                        ->rows(4),
+                ])->collapsible(),
+        ];
+    }
+
+    public static function table(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('name')
+                    ->label('Name')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('semibold')
+                    ->description(fn (Supplier $r) => str(strip_tags($r->description ?? ''))->limit(60)),
+                TextColumn::make('visibility')
+                    ->label('Sichtbarkeit')
+                    ->badge(),
+                TextColumn::make('group.name')
+                    ->label('Gehört zu')
+                    ->placeholder('—')
+                    ->color('gray')
+                    ->toggleable(),
+                TextColumn::make('products_count')
+                    ->label('Produkte')
+                    ->counts('products')
+                    ->badge()
+                    ->color('info'),
+                TextColumn::make('contact_email')
+                    ->label('E-Mail')
+                    ->searchable()
+                    ->copyable()
+                    ->icon(Heroicon::Envelope)
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('shipping_notes')
+                    ->label('Versand')
+                    ->limit(40)
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('updated_at')
+                    ->label('Aktualisiert')
+                    ->since()
+                    ->sortable()
+                    ->toggleable(),
+            ])
+            ->defaultSort('name')
+            ->recordUrl(fn (Supplier $record): string => static::getUrl('view', ['record' => $record]))
+            ->filters([
+                SelectFilter::make('visibility')
+                    ->label('Sichtbarkeit')
+                    ->options(Visibility::class),
+            ])
+            ->recordActions([
+                ViewAction::make()
+                    ->label('Ansehen')
+                    ->url(fn (Supplier $record): string => static::getUrl('view', ['record' => $record])),
+                EditAction::make()
+                    ->label('Bearbeiten')
+                    ->modalWidth('4xl')
+                    ->mutateDataUsing(fn (array $data, Supplier $record): array => [
+                        ...$data,
+                        'group_id' => $record->group_id ?? Filament::getTenant()?->getKey(),
+                    ]),
+                DeleteAction::make()
+                    ->label('Löschen')
+                    ->modalDescription('Nur Lieferanten ohne Produkte können gelöscht werden.'),
+            ])
+            ->emptyStateHeading('Noch keine Lieferanten')
+            ->emptyStateDescription('Lege einen Lieferanten an, um Produkte zu pflegen.');
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->visibleTo(Filament::getTenant());
+    }
+
+    /**
+     * New suppliers belong to the current group, even when shared.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function mutateFormDataBeforeCreate(array $data): array
+    {
+        $data['created_by_user_id'] = auth()->id();
+        $data['group_id'] = Filament::getTenant()?->getKey();
+
+        return $data;
+    }
+
+    public static function getRecordTitle(?Model $record): ?string
+    {
+        return $record?->name;
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            ProductsRelationManager::class,
+        ];
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => ManageSuppliers::route('/'),
+            'view' => ViewSupplier::route('/{record}'),
+        ];
+    }
+}

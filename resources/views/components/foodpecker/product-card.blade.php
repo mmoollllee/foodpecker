@@ -5,12 +5,11 @@
     'compact' => false,
     /** Beschreibung anzeigen? */
     'showDescription' => true,
-    /** Richtwert/Preis-Sektion anzeigen? */
+    /** Preis-Sektion anzeigen? */
     'showPricing' => true,
 ])
 
 @php
-    use App\Enums\PackagingStrategy;
     use App\Enums\ProductCategory;
     use App\Enums\Visibility;
 
@@ -19,9 +18,8 @@
         return;
     }
 
-    $product->loadMissing('manufacturer', 'priceTiers');
+    $product->loadMissing('supplier', 'priceTiers');
     $category = $product->category;
-    $strategy = $product->packaging_strategy;
     $visibility = $product->visibility;
 
     $unitLabel = $product->unitLabel();
@@ -78,9 +76,9 @@
                     <h3 class="font-semibold text-base sm:text-lg text-gray-900 dark:text-gray-50 leading-tight">
                         {{ $product->name }}
                     </h3>
-                    @if ($product->manufacturer)
+                    @if ($product->supplier)
                         <div class="mt-0.5 text-sm text-gray-500 dark:text-gray-400 truncate">
-                            {{ $product->manufacturer->name }}
+                            {{ $product->supplier->name }}
                         </div>
                     @endif
                 </div>
@@ -116,11 +114,9 @@
                 <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-white/5 px-2 py-0.5 font-medium text-gray-700 dark:text-gray-300">
                     {{ $unitLabel }}
                 </span>
-                @if ($strategy instanceof PackagingStrategy)
-                    <span class="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">
-                        {{ $strategy->getLabel() }}
-                    </span>
-                @endif
+                <span class="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">
+                    {{ $product->distributionLabel() }}
+                </span>
             </div>
         </div>
     </div>
@@ -144,16 +140,12 @@
                         <div class="flex items-center justify-between gap-3 text-sm">
                             <div class="flex items-center gap-2 min-w-0 flex-wrap">
                                 <span class="font-medium text-gray-900 dark:text-gray-100">{{ $tier->label }}</span>
-                                @if ($tier->is_divisible)
-                                    <span class="inline-flex items-center rounded bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-700 dark:text-emerald-300" title="Innerhalb der Gruppe teilbar">
-                                        teilbar
-                                        @if ($tier->divisible_step)
-                                            · in {{ rtrim(rtrim(number_format((float) $tier->divisible_step, 3, ',', '.'), '0'), ',') }} {{ $unitLabel }}-Schritten
-                                        @endif
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center rounded bg-rose-500/10 px-1.5 py-0.5 text-xs text-rose-700 dark:text-rose-300" title="Jede Packung geht ganz an eine Person">
-                                        nicht teilbar
+                                @if ($tier->article_number)
+                                    <span class="text-xs text-gray-500 dark:text-gray-400">Art.-Nr. {{ $tier->article_number }}</span>
+                                @endif
+                                @if ($tier->min_order_packages > 1)
+                                    <span class="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
+                                        ab {{ $tier->min_order_packages }} Stück
                                     </span>
                                 @endif
                             </div>
@@ -178,7 +170,7 @@
                         <div class="flex items-center justify-between gap-3 text-xs">
                             <span class="text-gray-600 dark:text-gray-300">
                                 {{ $observation->observed_on->format('m/Y') }}
-                                · {{ rtrim(rtrim(number_format((float) $observation->package_amount, 3, ',', '.'), '0'), ',') }} {{ $unitLabel }}
+                                · {{ \App\Models\CartItem::formatAmount((float) $observation->package_amount, $unitLabel) }}
                                 · {{ $observation->group_id === $currentGroup?->getKey() ? 'eure Gruppe' : 'andere Gruppe' }}
                             </span>
                             <span class="tabular-nums font-medium text-gray-900 dark:text-gray-100">
@@ -191,14 +183,5 @@
             </div>
         @endif
 
-        {{-- Richtwert als Footer --}}
-        @if ($showPricing && $product->estimated_price_cents)
-            <div class="px-4 py-2 bg-gray-50 dark:bg-white/[0.02] border-t border-gray-100 dark:border-white/5">
-                <div class="flex items-center justify-between gap-2 text-xs">
-                    <span class="text-gray-500 dark:text-gray-400">Eingepflegter Richtwert</span>
-                    <span class="font-medium tabular-nums text-amber-700 dark:text-amber-300">{{ $product->formattedEstimatedPrice() }}</span>
-                </div>
-            </div>
-        @endif
     @endif
 </div>

@@ -23,7 +23,7 @@ beforeEach(function () {
     ['group' => $this->group, 'round' => $this->round, 'lead' => $this->lead, 'members' => [$this->anna, $this->ben, $this->cleo]] = roundScenario(3, RoundPhase::Negotiating);
 
     $this->rice = productWithTier($this->group, packageAmount: 10, priceCents: 3000);
-    $this->mustard = productWithTier($this->group, packageAmount: 1, priceCents: 400, step: 1);
+    $this->mustard = productWithTier($this->group, packageAmount: 1, priceCents: 400, portion: 1);
 
     CartItem::factory()->for($this->round)->exact(5)->create(['user_id' => $this->anna->id, 'product_id' => $this->rice->id]);
     CartItem::factory()->for($this->round)->exact(5)->create(['user_id' => $this->ben->id, 'product_id' => $this->rice->id]);
@@ -58,6 +58,24 @@ it('counts only the votes of the people who receive a share of an item', functio
     expect($consensus->forItem($this->riceItem->id)->stakeholderIds)->toEqualCanonicalizing([$this->anna->id, $this->ben->id])
         ->and($consensus->forItem($this->mustardItem->id)->stakeholderIds)->toBe([$this->cleo->id])
         ->and($consensus->isUnanimous())->toBeTrue();
+});
+
+it('lets people who ordered a product decide on it even when the proposal gives them nothing', function () {
+    $builder = app(ProposalBuilder::class);
+    $version = $builder->createNewVersion($this->proposal, $this->lead);
+    $builder->setAllocation($version->items()->where('product_id', $this->rice->id)->firstOrFail(), $this->ben->id, 0);
+    $this->workflow->publish($version->fresh(), $this->lead);
+
+    $riceItem = $version->items()->where('product_id', $this->rice->id)->firstOrFail();
+    $this->workflow->vote($riceItem, $this->anna, VoteValue::Up);
+    $this->workflow->vote($version->items()->where('product_id', $this->mustard->id)->firstOrFail(), $this->cleo, VoteValue::Up);
+
+    expect(app(ConsensusChecker::class)->evaluate($version->fresh())->pendingUserIds())->toBe([$this->ben->id]);
+
+    $this->workflow->vote($riceItem, $this->ben, VoteValue::Down, 'Ich wollte doch Reis');
+
+    expect(app(ConsensusChecker::class)->evaluate($version->fresh())->rejections())
+        ->toBe([$this->ben->id => [$riceItem->id => 'Ich wollte doch Reis']]);
 });
 
 it('blocks the proposal while a stakeholder has not voted or voted thumbs down', function () {

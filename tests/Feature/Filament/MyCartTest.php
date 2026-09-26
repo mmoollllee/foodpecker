@@ -123,6 +123,31 @@ it('suggests what somebody received in the last completed round', function () {
     expect((float) $current->cartItems()->where('user_id', $anna->id)->value('exact_quantity'))->toBe(10.0);
 });
 
+it('copies last time\'s amounts in whole portions of today\'s product', function () {
+    Filament::setTenant(null);
+
+    ['group' => $group, 'round' => $previous, 'lead' => $lead, 'members' => [$anna]] = roundScenario(1, RoundPhase::Negotiating);
+    $pesto = productWithTier($group, packageAmount: 6, priceCents: 1438, portion: 1);
+    CartItem::factory()->for($previous)->exact(1.5)->create(['user_id' => $anna->id, 'product_id' => $pesto->id]);
+
+    $proposal = app(ProposalBuilder::class)->createFromCarts($previous, $lead, ['title' => 'P']);
+    $workflow = app(ProposalWorkflow::class);
+    $workflow->publish($proposal, $lead);
+    $previous->update(['phase' => RoundPhase::Finalizing]);
+    $workflow->vote($proposal->items()->first(), $anna, VoteValue::Up);
+    $workflow->choose($proposal->fresh(), $lead);
+    $previous->update(['phase' => RoundPhase::Completed]);
+
+    $current = Round::factory()->for($group)->create(['lead_user_id' => $lead->id]);
+    actingInGroup($anna, $group);
+
+    Livewire::test(MyCart::class)
+        ->callAction('copyPreviousOrder')
+        ->assertNotified('1 Artikel übernommen.');
+
+    expect((float) $current->cartItems()->where('user_id', $anna->id)->value('exact_quantity'))->toBe(2.0);
+});
+
 it('does not let people change the cart items of others', function () {
     $saraItem = CartItem::where('round_id', $this->round->id)
         ->where('user_id', User::where('email', 'sara@foodpecker.test')->value('id'))
@@ -191,4 +216,29 @@ it('lists the own past orders with frozen prices', function () {
         ->assertSee('Spätsommer-Bestellung 2025')
         ->assertSee('Bio Dinkelmehl Type 630')
         ->assertSee('Bezahlt');
+});
+
+it('shows what the cart will probably cost', function () {
+    Livewire::test(MyCart::class)
+        ->assertSee('Voraussichtlich gesamt')
+        ->assertSee('der Versand kommt nach den Rückmeldungen der Lieferanten dazu');
+});
+
+it('prices the wish while it is typed in', function () {
+    $polenta = Product::where('name', 'Bio Polenta grob')->firstOrFail();
+
+    Livewire::test(MyCart::class)
+        ->mountAction('addItem', ['product' => $polenta->id])
+        ->setActionData(['quantity_mode' => QuantityMode::Exact->value, 'exact_quantity' => 5])
+        ->assertMountedActionModalSee('Voraussichtlich');
+});
+
+it('lists the products of the round to browse and filters them', function () {
+    Livewire::test(MyCart::class)
+        ->assertSee('Sortiment dieser Runde')
+        ->assertSee('Bio Polenta grob')
+        ->assertSee('Spirelli aus Hartweizen')
+        ->set('search', 'polenta')
+        ->assertSee('Bio Polenta grob')
+        ->assertDontSee('Spirelli aus Hartweizen');
 });

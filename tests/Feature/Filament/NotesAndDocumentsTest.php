@@ -2,13 +2,13 @@
 
 use App\Enums\GroupRole;
 use App\Enums\Visibility;
-use App\Filament\Resources\Manufacturers\Pages\ViewManufacturer;
-use App\Filament\Resources\Manufacturers\RelationManagers\ProductsRelationManager;
 use App\Filament\Resources\Products\Pages\ViewProduct;
+use App\Filament\Resources\Suppliers\Pages\ViewSupplier;
+use App\Filament\Resources\Suppliers\RelationManagers\ProductsRelationManager;
 use App\Models\Attachment;
 use App\Models\Group;
-use App\Models\Manufacturer;
 use App\Models\Note;
+use App\Models\Supplier;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Http\UploadedFile;
@@ -23,46 +23,46 @@ beforeEach(function () {
     $this->participant = User::factory()->create(['first_name' => 'Pia', 'last_name' => 'Teil']);
     $this->group->members()->attach($this->participant->id, ['role' => GroupRole::Participant->value]);
 
-    $this->manufacturer = Manufacturer::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Public, 'name' => 'Mühle']);
+    $this->supplier = Supplier::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Public, 'name' => 'Mühle']);
     $this->product = productWithTier($this->group);
-    $this->product->update(['manufacturer_id' => $this->manufacturer->id, 'visibility' => Visibility::Public]);
+    $this->product->update(['supplier_id' => $this->supplier->id, 'visibility' => Visibility::Public]);
 
     $this->otherOwner = User::factory()->create();
     $this->otherGroup = Group::factory()->create(['owner_id' => $this->otherOwner->id]);
 });
 
-it('lets every member write notes about a manufacturer', function () {
+it('lets every member write notes about a supplier', function () {
     actingInGroup($this->participant, $this->group);
 
-    Livewire::test(ViewManufacturer::class, ['record' => $this->manufacturer->id])
+    Livewire::test(ViewSupplier::class, ['record' => $this->supplier->id])
         ->assertSeeLivewire(ProductsRelationManager::class)
         ->callAction('addNote', data: ['body' => 'Sehr freundlicher Kontakt, liefert schnell.'])
         ->assertHasNoActionErrors()
         ->assertSee('Sehr freundlicher Kontakt, liefert schnell.');
 
-    expect(Note::where('notable_id', $this->manufacturer->id)->value('group_id'))->toBe($this->group->id)
-        ->and($this->manufacturer->activities()->where('action', 'note_added')->exists())->toBeTrue();
+    expect(Note::where('notable_id', $this->supplier->id)->value('group_id'))->toBe($this->group->id)
+        ->and($this->supplier->activities()->where('action', 'note_added')->exists())->toBeTrue();
 });
 
-it('shares notes on public manufacturers with other groups without names', function () {
-    $this->manufacturer->notes()->create(['user_id' => $this->participant->id, 'group_id' => $this->group->id, 'body' => 'Im Winter früher bestellen.']);
+it('shares notes on public suppliers with other groups without names', function () {
+    $this->supplier->notes()->create(['user_id' => $this->participant->id, 'group_id' => $this->group->id, 'body' => 'Im Winter früher bestellen.']);
 
     actingInGroup($this->otherOwner, $this->otherGroup);
 
-    Livewire::test(ViewManufacturer::class, ['record' => $this->manufacturer->id])
+    Livewire::test(ViewSupplier::class, ['record' => $this->supplier->id])
         ->assertSee('Im Winter früher bestellen.')
         ->assertSee('Mitglied einer anderen Gruppe')
         ->assertDontSee('Pia Teil')
-        ->assertActionHidden(TestAction::make('deleteNote')->arguments(['note' => $this->manufacturer->notes()->first()->id]));
+        ->assertActionHidden(TestAction::make('deleteNote')->arguments(['note' => $this->supplier->notes()->first()->id]));
 });
 
-it('keeps notes on private manufacturers inside the group', function () {
-    $private = Manufacturer::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Private]);
+it('keeps notes on private suppliers inside the group', function () {
+    $private = Supplier::factory()->create(['group_id' => $this->group->id, 'visibility' => Visibility::Private]);
     $private->notes()->create(['user_id' => $this->participant->id, 'group_id' => $this->group->id, 'body' => 'Nur für uns.']);
 
     actingInGroup($this->otherOwner, $this->otherGroup);
 
-    Livewire::test(ViewManufacturer::class, ['record' => $private->id])
+    Livewire::test(ViewSupplier::class, ['record' => $private->id])
         ->assertNotFound();
 });
 

@@ -2,11 +2,13 @@
 
 namespace App\Filament\Forms;
 
+use App\Rules\Iban;
 use Filament\Forms\Components\TextInput;
 
 /**
  * A person's own details — asked at registration and editable in the
- * profile. Everybody sharing a group sees them in the member list.
+ * profile. Everybody sharing a group sees them in the member list; the
+ * bank details only those who pay for a round the person leads.
  */
 class UserFields
 {
@@ -73,5 +75,40 @@ class UserFields
             ->minValue(1)
             ->maxValue(20)
             ->required();
+    }
+
+    /**
+     * Where payments for rounds the person leads go. Stored without spaces,
+     * shown in blocks of four.
+     */
+    public static function iban(): TextInput
+    {
+        return TextInput::make('iban')
+            ->label('IBAN')
+            ->placeholder('DE89 3704 0044 0532 0130 00')
+            ->rule(new Iban)
+            ->maxLength(42)
+            ->formatStateUsing(fn (?string $state): ?string => filled($state) ? trim(chunk_split($state, 4, ' ')) : null)
+            ->dehydrateStateUsing(fn (?string $state): ?string => Iban::normalize($state));
+    }
+
+    public static function bankAccountHolder(): TextInput
+    {
+        return TextInput::make('bank_account_holder')
+            ->label('Kontoinhaber')
+            ->placeholder(fn (): ?string => auth()->user()?->fullName())
+            ->helperText('Leer lassen, wenn das Konto auf deinen Namen läuft.')
+            ->maxLength(70);
+    }
+
+    public static function bic(): TextInput
+    {
+        return TextInput::make('bic')
+            ->label('BIC')
+            ->helperText('Optional — nur für Überweisungen aus dem Ausland nötig.')
+            ->regex('/^[A-Za-z]{6}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$/')
+            ->validationMessages(['regex' => 'Ein BIC hat 8 oder 11 Zeichen, z. B. COBADEFFXXX.'])
+            ->maxLength(11)
+            ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? strtoupper(trim($state)) : null);
     }
 }

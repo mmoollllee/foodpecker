@@ -7,6 +7,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * A package size the supplier sells, with its list price — e.g. a
+ * 25 kg sack. Several sizes of a product can be combined in one order.
+ */
 class PriceTier extends Model
 {
     /** @use HasFactory<PriceTierFactory> */
@@ -15,11 +19,10 @@ class PriceTier extends Model
     protected $fillable = [
         'product_id',
         'label',
+        'article_number',
         'package_amount',
         'min_order_packages',
         'price_cents',
-        'is_divisible',
-        'divisible_step',
         'sort_order',
     ];
 
@@ -27,8 +30,6 @@ class PriceTier extends Model
     {
         return [
             'package_amount' => 'decimal:3',
-            'divisible_step' => 'decimal:3',
-            'is_divisible' => 'boolean',
             'price_cents' => 'integer',
             'min_order_packages' => 'integer',
         ];
@@ -75,10 +76,5 @@ class PriceTier extends Model
     public function formattedPrice(): string
     {
         return number_format($this->price_cents / 100, 2, ',', '.').' €';
-    }
-
-    public function effectiveStep(): float
-    {
-        return (float) ($this->divisible_step ?? $this->package_amount);
     }
 }

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3b396f0c8e501de73e9e5f5fdd218fc0",
+    "content-hash": "ce350a9e54fa30d35ff6ed4fbca0621f",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -516,6 +516,53 @@
                 }
             ],
             "time": "2026-03-20T21:10:52+00:00"
+        },
+        {
+            "name": "codewithkyrian/filament-date-range",
+            "version": "dev-feat/l13+performance",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/mmoollllee/filament-date-range.git",
+                "reference": "913bc1c67c03d086a473db0ad41e538303a26e41"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/mmoollllee/filament-date-range/zipball/913bc1c67c03d086a473db0ad41e538303a26e41",
+                "reference": "913bc1c67c03d086a473db0ad41e538303a26e41",
+                "shasum": ""
+            },
+            "require": {
+                "filament/forms": "^4.0||^5.0",
+                "filament/tables": "^4.0||^5.0",
+                "php": "^8.3"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "CodeWithKyrian\\FilamentDateRange\\DateRangeServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "CodeWithKyrian\\FilamentDateRange\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Kyrian Obikwelu",
+                    "email": "kyrianobikwelu@gmail.com"
+                }
+            ],
+            "description": "A date range field and filter for Filament v3.",
+            "support": {
+                "source": "https://github.com/mmoollllee/filament-date-range/tree/feat/l13+performance"
+            },
+            "time": "2026-09-26T07:46:58+00:00"
         },
         {
             "name": "danharrin/date-format-converter",
@@ -14453,7 +14500,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "codewithkyrian/filament-date-range": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

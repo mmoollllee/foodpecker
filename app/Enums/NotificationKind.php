@@ -26,7 +26,7 @@ enum NotificationKind: string implements HasLabel
     {
         return match ($this) {
             self::ShoppingOpen => '🛒 Einkaufsphase eröffnet',
-            self::NegotiationStarted => '📞 Verhandlung läuft',
+            self::NegotiationStarted => '📞 Anpassung läuft',
             self::ProposalReady => '🤝 Vorschlag zur Abstimmung',
             self::PaymentDue => '💶 Zahlung fällig',
             self::PaymentsComplete => '✅ Alle haben bezahlt',
@@ -61,7 +61,7 @@ enum NotificationKind: string implements HasLabel
     {
         $prefix = match ($this) {
             self::ShoppingOpen => '🛒 Einkaufsphase eröffnet',
-            self::NegotiationStarted => '📞 Verhandlungen laufen',
+            self::NegotiationStarted => '📞 Preise werden angefragt',
             self::ProposalReady => '🤝 Bestellvorschlag bereit zur Abstimmung',
             self::PaymentDue => '💶 Zahlung fällig',
             self::PaymentsComplete => '✅ Alle Zahlungen sind da',
@@ -83,14 +83,14 @@ enum NotificationKind: string implements HasLabel
                 $round->title,
                 $round->shopping_deadline?->format('d.m.Y') ?? 'noch offen',
             ),
-            self::NegotiationStarted => 'die Einkaufsphase ist vorbei, ich hole jetzt die aktuellen Preise bei den Herstellern ein und melde mich mit einem Bestellvorschlag.',
-            self::ProposalReady => 'es gibt einen Bestellvorschlag. Bitte stimmt zeitnah pro Position ab — Daumen hoch oder Daumen runter (mit Begründung).',
+            self::NegotiationStarted => 'die Einkaufsphase ist vorbei, ich hole jetzt die aktuellen Preise und Versandkosten bei den Lieferanten ein und melde mich mit einem Bestellvorschlag.',
+            self::ProposalReady => 'es gibt einen Bestellvorschlag mit den Preisen der Lieferanten. Bitte stimmt zeitnah ab — pro Position Daumen hoch oder runter (mit Begründung), oder mit „Allem zustimmen“ auf einmal.',
             self::PaymentDue => sprintf(
                 'die Bestellung steht. Bitte überweist eure Anteile bis spätestens %s — die Beträge seht ihr im Panel unter „Zahlung & Abholung“.',
                 $round->payment_deadline?->format('d.m.Y') ?? 'baldmöglichst',
             ),
-            self::PaymentsComplete => 'alle Zahlungen sind eingegangen — danke! Ich gebe die Bestellung jetzt beim Hersteller auf.',
-            self::OrderPlaced => 'die Bestellung ist beim Hersteller raus. Voraussichtliche Lieferung: '
+            self::PaymentsComplete => 'alle Zahlungen sind eingegangen — danke! Ich gebe die Bestellung jetzt bei den Lieferanten auf.',
+            self::OrderPlaced => 'die Bestellung ist bei den Lieferanten raus. Voraussichtliche Lieferung: '
                 .($round->expected_delivery?->format('d.m.Y') ?? 'noch offen').'.',
             self::PickupReady => 'die Ware ist da! Bitte wählt im Panel euren Abholtermin und holt eure Sachen ab.',
             self::RoundCompleted => 'die Runde ist abgeschlossen — danke fürs Mitmachen! Wenn euch etwas aufgefallen ist, schreibt gern eine Notiz an die Runde.',

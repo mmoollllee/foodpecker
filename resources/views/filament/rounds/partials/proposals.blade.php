@@ -7,10 +7,14 @@
 
 <div class="mt-4 space-y-4">
     @forelse ($current as $proposal)
-        @include('filament.rounds.partials.proposal', ['proposal' => $proposal])
+        @if ($this->canEditProposal($proposal))
+            @include('filament.rounds.partials.draft-editor', ['proposal' => $proposal])
+        @else
+            @include('filament.rounds.partials.proposal', ['proposal' => $proposal])
+        @endif
     @empty
         <p class="text-sm text-gray-500">
-            Noch keine Vorschläge. Der Lead erstellt in der Verhandlung einen Vorschlag aus den Warenkörben; in der Bestätigung können alle Gegenvorschläge machen.
+            Noch kein Bestellvorschlag. Er entsteht, sobald die Einkaufsphase endet; in der Bestätigung können alle Gegenvorschläge machen.
         </p>
     @endforelse
 

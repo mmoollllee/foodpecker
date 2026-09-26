@@ -57,4 +57,13 @@ class Payment extends Model
     {
         return in_array($this->status, [PaymentStatus::Paid, PaymentStatus::Waived], true);
     }
+
+    /**
+     * The transfer's reference, so the lead sees who paid for which round —
+     * e.g. "Herbst-Bestellung 2026 – Aylin Yıldız".
+     */
+    public function transferReference(): string
+    {
+        return mb_substr(($this->round?->title ?? 'Foodpecker').' – '.($this->user?->fullName() ?? ''), 0, 140);
+    }
 }
